@@ -7,10 +7,11 @@ build/
 coverage/
 .turbo/
 
-# Env & secrets
+# Env & secrets (including *.example / *.development)
 .env
 .env.*
-!.env.example
+*.env
+*.env.*
 
 # Logs & OS
 *.log
