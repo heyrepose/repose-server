@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: repose_postgres
+    environment:
+      POSTGRES_USER: repose
+      POSTGRES_PASSWORD: repose
+      POSTGRES_DB: repose_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repose -d repose_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: repose_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.9
+    container_name: repose_meilisearch
+    environment:
+      MEILI_MASTER_KEY: dev-master-key
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilidata:/meili_data
+
+volumes:
+  pgdata:
+  meilidata:
