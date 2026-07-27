@@ -1,11 +1,11 @@
-import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { NotificationType, Prisma } from '@prisma/client';
-import type { AppConfig } from '../../config/configuration';
-import { PrismaService } from '../../prisma/prisma.service';
-import { ChatGateway } from '../chat/chat.gateway';
-import { NotificationNotFoundException } from './notifications.errors';
-import { ListNotificationsQueryDto } from './dto/notifications.dto';
+import { forwardRef, Inject, Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { NotificationType, Prisma } from "@prisma/client";
+import type { AppConfig } from "../../config/configuration";
+import { PrismaService } from "../../prisma/prisma.service";
+import { ChatGateway } from "../chat/chat.gateway";
+import { NotificationNotFoundException } from "./notifications.errors";
+import { ListNotificationsQueryDto } from "./dto/notifications.dto";
 
 export interface DispatchNotificationInput {
   userId: string;
@@ -42,11 +42,11 @@ export class NotificationsService {
     });
     if (!user) return null;
 
-    if (input.type === 'ORDER_UPDATE' || input.type === 'ITEM_SOLD') {
+    if (input.type === "ORDER_UPDATE" || input.type === "ITEM_SOLD") {
       if (!user.notifyOrderUpdates) return null;
-    } else if (input.type === 'NEW_MESSAGE') {
+    } else if (input.type === "NEW_MESSAGE") {
       if (!user.notifyMessages) return null;
-    } else if (input.type === 'SYSTEM' || input.type === 'OFFER_RECEIVED') {
+    } else if (input.type === "SYSTEM" || input.type === "OFFER_RECEIVED") {
       if (!user.notifyMarketing) return null;
     }
 
@@ -72,20 +72,15 @@ export class NotificationsService {
     };
 
     try {
-      this.chatGateway.emitToUser(input.userId, 'notification:new', payload);
+      this.chatGateway.emitToUser(input.userId, "notification:new", payload);
     } catch (err) {
       this.logger.warn(
         `Socket emit notification:new failed: ${(err as Error).message}`,
       );
     }
 
-    void this.sendPush(
-      input.userId,
-      input.title,
-      input.body,
-      input.data,
-    ).catch((err) =>
-      this.logger.warn(`sendPush failed: ${(err as Error).message}`),
+    void this.sendPush(input.userId, input.title, input.body, input.data).catch(
+      (err) => this.logger.warn(`sendPush failed: ${(err as Error).message}`),
     );
 
     return payload;
@@ -101,7 +96,9 @@ export class NotificationsService {
     body: string,
     data?: Record<string, unknown>,
   ): Promise<void> {
-    const fcmJson = this.config.get('FCM_SERVICE_ACCOUNT_JSON', { infer: true });
+    const fcmJson = this.config.get("FCM_SERVICE_ACCOUNT_JSON", {
+      infer: true,
+    });
     if (!fcmJson) {
       this.logger.debug(
         `FCM skipped — FCM_SERVICE_ACCOUNT_JSON unset (user=${userId})`,
@@ -119,7 +116,7 @@ export class NotificationsService {
     }
 
     this.logger.log(
-      `FCM stub: would send to ${user.fcmTokens.length} token(s) user=${userId} title="${title}" dataKeys=${Object.keys(data ?? {}).join(',') || 'none'} bodyLen=${body.length}`,
+      `FCM stub: would send to ${user.fcmTokens.length} token(s) user=${userId} title="${title}" dataKeys=${Object.keys(data ?? {}).join(",") || "none"} bodyLen=${body.length}`,
     );
   }
 
@@ -127,7 +124,7 @@ export class NotificationsService {
     const limit = query.limit ?? 20;
     const rows = await this.prisma.notification.findMany({
       where: { userId },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
     });
