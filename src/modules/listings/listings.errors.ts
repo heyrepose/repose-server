@@ -73,3 +73,33 @@ export class ListingNotReportableException extends DomainException {
     );
   }
 }
+
+export class ListingNotEditableException extends DomainException {
+  constructor() {
+    super(
+      'LISTING_NOT_EDITABLE',
+      'Only draft or active listings can be edited',
+      409,
+    );
+  }
+}
+
+export class ListingNotUnpublishableException extends DomainException {
+  constructor() {
+    super(
+      'LISTING_NOT_UNPUBLISHABLE',
+      'Only active listings can be unpublished',
+      409,
+    );
+  }
+}
+
+export class ListingNotRelistableException extends DomainException {
+  constructor() {
+    super(
+      'LISTING_NOT_RELISTABLE',
+      'Only sold or removed listings can be relisted as a new draft',
+      409,
+    );
+  }
+}

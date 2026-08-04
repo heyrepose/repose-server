@@ -14,6 +14,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/library';
 import type { AppConfig } from '../../config/configuration';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
 import { AddressesService } from '../addresses/addresses.service';
 import { AddressNotFoundException } from '../addresses/addresses.errors';
 import { ListingNotAvailableException } from '../listings/listings.errors';
@@ -66,6 +67,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly redis: RedisService,
     private readonly stateMachine: OrderStateMachine,
     private readonly addresses: AddressesService,
     @Inject(forwardRef(() => PaymentsService))
@@ -367,33 +369,69 @@ export class OrdersService {
     return this.getById(userId, orderId);
   }
 
-  /** Auto-cancel PAID_HELD orders that sellers never shipped. */
+  /**
+   * Remind sellers to ship PAID_HELD orders — warn-only (no auto-cancel / refund).
+   * Eve: once when within 1 day of ORDER_SHIP_TIMEOUT_DAYS.
+   * Deadline: once when past ORDER_SHIP_TIMEOUT_DAYS.
+   */
   @Cron(CronExpression.EVERY_HOUR)
   async cronShipTimeout(): Promise<void> {
     const days = this.config.get('ORDER_SHIP_TIMEOUT_DAYS', { infer: true });
-    const cutoff = new Date();
-    cutoff.setUTCDate(cutoff.getUTCDate() - days);
+    const now = Date.now();
+    const eveMs = Math.max(days - 1, 0) * 24 * 60 * 60 * 1000;
+    const deadlineMs = days * 24 * 60 * 60 * 1000;
 
-    const stale = await this.prisma.order.findMany({
-      where: {
-        status: OrderStatus.PAID_HELD,
-        updatedAt: { lt: cutoff },
+    const held = await this.prisma.order.findMany({
+      where: { status: OrderStatus.PAID_HELD },
+      include: {
+        payment: true,
+        items: true,
       },
-      take: 50,
+      take: 100,
     });
 
-    for (const order of stale) {
+    for (const order of held) {
+      const paidAt = order.payment?.capturedAt ?? order.updatedAt;
+      const ageMs = now - paidAt.getTime();
+      const sellers = [...new Set(order.items.map((i) => i.sellerId))];
+
       try {
-        await this.stateMachine.transition(
-          order.id,
-          OrderStatus.CANCELLED,
-          null,
-          `Auto-cancelled: seller did not ship within ${days} days`,
-        );
-        this.logger.log(`Ship-timeout cancelled order ${order.id}`);
+        if (ageMs >= deadlineMs) {
+          const key = `order:ship_warn:${order.id}:deadline`;
+          const already = await this.redis.get(key);
+          if (!already) {
+            for (const sellerId of sellers) {
+              await this.notifications.dispatch({
+                userId: sellerId,
+                type: 'ORDER_UPDATE',
+                title: 'Ship reminder — overdue',
+                body: `This order still needs shipping. Please ship as soon as you can.`,
+                data: { route: 'order', orderId: order.id },
+              });
+            }
+            await this.redis.set(key, '1', 60 * 60 * 24 * 30);
+            this.logger.log(`Ship-deadline reminder sent for order ${order.id}`);
+          }
+        } else if (ageMs >= eveMs) {
+          const key = `order:ship_warn:${order.id}:eve`;
+          const already = await this.redis.get(key);
+          if (!already) {
+            for (const sellerId of sellers) {
+              await this.notifications.dispatch({
+                userId: sellerId,
+                type: 'ORDER_UPDATE',
+                title: 'Ship reminder',
+                body: `Please ship this order soon — the ship window is almost up.`,
+                data: { route: 'order', orderId: order.id },
+              });
+            }
+            await this.redis.set(key, '1', 60 * 60 * 24 * 14);
+            this.logger.log(`Ship-eve reminder sent for order ${order.id}`);
+          }
+        }
       } catch (err) {
         this.logger.warn(
-          `Ship-timeout failed for ${order.id}: ${(err as Error).message}`,
+          `Ship-timeout reminder failed for ${order.id}: ${(err as Error).message}`,
         );
       }
     }
@@ -508,6 +546,17 @@ export class OrdersService {
       };
     }>,
   ) {
+    const shipTimeoutDays = this.config.get('ORDER_SHIP_TIMEOUT_DAYS', {
+      infer: true,
+    });
+    const paidAt = order.payment?.capturedAt ?? null;
+    let shipByAt: string | null = null;
+    if (order.status === OrderStatus.PAID_HELD && paidAt) {
+      const deadline = new Date(paidAt);
+      deadline.setUTCDate(deadline.getUTCDate() + shipTimeoutDays);
+      shipByAt = deadline.toISOString();
+    }
+
     return {
       id: order.id,
       status: order.status,
@@ -548,8 +597,12 @@ export class OrdersService {
         ? {
             status: order.payment.status,
             providerIntentId: order.payment.providerIntentId,
+            capturedAt: order.payment.capturedAt?.toISOString() ?? null,
           }
         : null,
+      paidAt: paidAt?.toISOString() ?? null,
+      shipByAt,
+      shipTimeoutDays,
     };
   }
 }

@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ListingStatus, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -28,8 +29,11 @@ import {
   ListingInvalidPriceException,
   ListingMissingCategoryException,
   ListingMissingPhotosException,
+  ListingNotEditableException,
   ListingNotFoundException,
+  ListingNotRelistableException,
   ListingNotReportableException,
+  ListingNotUnpublishableException,
   ListingTooManyPhotosException,
 } from './listings.errors';
 import { decimalToString, toProductCard } from './listings.mapper';
@@ -49,6 +53,8 @@ const OPEN_ORDER_STATUSES = [
 
 @Injectable()
 export class ListingsService {
+  private readonly logger = new Logger(ListingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -73,9 +79,8 @@ export class ListingsService {
   }
 
   async createUploadUrl(sellerId: string, listingId: string) {
+    // Cap is enforced on confirmPhotos (replace semantics).
     const listing = await this.requireOwned(sellerId, listingId);
-    const count = await this.prisma.listingImage.count({ where: { listingId } });
-    if (count >= MAX_PHOTOS) throw new ListingTooManyPhotosException();
 
     const publicId = `${listing.id}-${Date.now()}`;
     const signed = this.images.createSignedUpload(
@@ -95,8 +100,8 @@ export class ListingsService {
 
   async confirmPhotos(sellerId: string, listingId: string, dto: ConfirmPhotosDto) {
     await this.requireOwned(sellerId, listingId);
-    const existing = await this.prisma.listingImage.count({ where: { listingId } });
-    if (existing + dto.images.length > MAX_PHOTOS) {
+    // Replace semantics: the posted set becomes the full photo list (max 5).
+    if (dto.images.length > MAX_PHOTOS) {
       throw new ListingTooManyPhotosException();
     }
 
@@ -131,12 +136,25 @@ export class ListingsService {
   }
 
   async update(sellerId: string, listingId: string, dto: UpdateListingDto) {
-    await this.requireOwned(sellerId, listingId);
+    const existing = await this.requireOwned(sellerId, listingId);
+    if (
+      existing.status !== ListingStatus.DRAFT &&
+      existing.status !== ListingStatus.ACTIVE
+    ) {
+      throw new ListingNotEditableException();
+    }
+
     if (dto.categoryId) {
       const category = await this.prisma.category.findFirst({
         where: { id: dto.categoryId, isActive: true },
       });
       if (!category) throw new ListingMissingCategoryException();
+    }
+
+    let priceAed: Decimal | undefined;
+    if (dto.priceAed !== undefined) {
+      priceAed = new Decimal(dto.priceAed);
+      if (priceAed.lte(0)) throw new ListingInvalidPriceException();
     }
 
     const listing = await this.prisma.listing.update({
@@ -147,6 +165,8 @@ export class ListingsService {
         size: dto.size,
         description: dto.description,
         categoryId: dto.categoryId,
+        ...(dto.condition !== undefined ? { condition: dto.condition } : {}),
+        ...(priceAed !== undefined ? { priceAed } : {}),
       },
       include: {
         images: { orderBy: { sortOrder: 'asc' } },
@@ -160,6 +180,80 @@ export class ListingsService {
     }
 
     return this.serializeDetail(listing, false);
+  }
+
+  async unpublish(sellerId: string, listingId: string) {
+    const listing = await this.requireOwned(sellerId, listingId);
+    if (listing.status !== ListingStatus.ACTIVE) {
+      throw new ListingNotUnpublishableException();
+    }
+
+    const open = await this.prisma.orderItem.findFirst({
+      where: {
+        listingId,
+        order: { status: { in: [...OPEN_ORDER_STATUSES] } },
+      },
+    });
+    if (open) throw new ListingHasOpenOrderException();
+
+    const updated = await this.prisma.listing.update({
+      where: { id: listingId },
+      data: { status: ListingStatus.DRAFT },
+    });
+    this.events.emit(ListingEvents.Removed, { listingId });
+
+    return {
+      id: updated.id,
+      status: updated.status,
+    };
+  }
+
+  /**
+   * Duplicate a SOLD or REMOVED listing into a fresh DRAFT (photos + details).
+   * Does not mutate the original sold record.
+   */
+  async relist(sellerId: string, listingId: string) {
+    const source = await this.requireOwned(sellerId, listingId);
+    if (
+      source.status !== ListingStatus.SOLD &&
+      source.status !== ListingStatus.REMOVED
+    ) {
+      throw new ListingNotRelistableException();
+    }
+
+    const images = await this.prisma.listingImage.findMany({
+      where: { listingId },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    const draft = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.listing.create({
+        data: {
+          sellerId,
+          categoryId: source.categoryId,
+          title: source.title,
+          description: source.description,
+          brand: source.brand,
+          size: source.size,
+          condition: source.condition,
+          priceAed: source.priceAed,
+          attributes: source.attributes ?? undefined,
+          status: ListingStatus.DRAFT,
+        },
+      });
+      if (images.length) {
+        await tx.listingImage.createMany({
+          data: images.map((img) => ({
+            listingId: created.id,
+            url: img.url,
+            sortOrder: img.sortOrder,
+          })),
+        });
+      }
+      return created;
+    });
+
+    return { id: draft.id, status: draft.status };
   }
 
   async publish(sellerId: string, listingId: string, dto: PublishListingDto) {
@@ -209,7 +303,10 @@ export class ListingsService {
       throw new ListingNotFoundException();
     }
 
-    void this.bufferView(listingId);
+    // Don't inflate view counts with the seller viewing their own listing.
+    if (viewerId !== listing.sellerId) {
+      void this.bufferView(listingId);
+    }
 
     let isSavedByCurrentUser = false;
     if (viewerId) {
@@ -338,10 +435,61 @@ export class ListingsService {
     sellerId: string,
     opts: { status?: string; cursor?: string; limit?: number },
   ) {
-    const limit = Math.min(opts.limit ?? 20, 50);
-    const cursor = decodeKeyset(opts.cursor);
-    const status = (opts.status as ListingStatus | undefined) ?? ListingStatus.ACTIVE;
+    // Public closet: only ACTIVE listings — drafts and sold must never leak.
+    return this.listSellerInventory(sellerId, {
+      ...opts,
+      status: ListingStatus.ACTIVE,
+      forceStatus: true,
+    });
+  }
 
+  /** Authenticated own inventory — any status including DRAFT. */
+  async listOwn(
+    sellerId: string,
+    opts: { status?: string; cursor?: string; limit?: number },
+  ) {
+    return this.listSellerInventory(sellerId, {
+      ...opts,
+      forceStatus: false,
+      orderByCreatedAt: true,
+    });
+  }
+
+  private async listSellerInventory(
+    sellerId: string,
+    opts: {
+      status?: string;
+      cursor?: string;
+      limit?: number;
+      forceStatus?: boolean;
+      orderByCreatedAt?: boolean;
+    },
+  ) {
+    const limit = Math.min(opts.limit ?? 20, 50);
+    const status = opts.forceStatus
+      ? ListingStatus.ACTIVE
+      : ((opts.status as ListingStatus | undefined) ?? ListingStatus.ACTIVE);
+
+    if (opts.orderByCreatedAt) {
+      const cursor = decodeOffset(opts.cursor);
+      const rows = await this.prisma.listing.findMany({
+        where: { sellerId, status },
+        include: { images: { orderBy: { sortOrder: 'asc' }, take: 1 } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: cursor,
+        take: limit + 1,
+      });
+      const page = rows.slice(0, limit);
+      const hasMore = rows.length > limit;
+      return {
+        data: page.map(toProductCard),
+        meta: {
+          nextCursor: hasMore ? encodeOffset(cursor + limit) : null,
+        },
+      };
+    }
+
+    const cursor = decodeKeyset(opts.cursor);
     const where: Prisma.ListingWhereInput = {
       sellerId,
       status,
@@ -379,6 +527,60 @@ export class ListingsService {
             : null,
       },
     };
+  }
+
+  /** Flush Redis view buffers into Postgres Listing.viewCount. */
+  @Cron(CronExpression.EVERY_HOUR)
+  async cronFlushViews(): Promise<void> {
+    try {
+      const flushed = await this.flushViewBuffers();
+      if (flushed > 0) {
+        this.logger.log(`Flushed view counts for ${flushed} listings`);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `View flush cron failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  async flushViewBuffers(): Promise<number> {
+    const stream = this.redis.raw.scanStream({
+      match: 'listing:views:*',
+      count: 100,
+    });
+
+    let flushed = 0;
+    const batch: string[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (keys: string[]) => {
+        batch.push(...keys);
+      });
+      stream.on('end', () => resolve());
+      stream.on('error', reject);
+    });
+
+    // Atomic GET+DEL so increments between get and del are not dropped.
+    const getdelScript =
+      'local v = redis.call("GET", KEYS[1]); if v then redis.call("DEL", KEYS[1]) end; return v';
+
+    for (const key of batch) {
+      const listingId = key.replace('listing:views:', '');
+      if (!listingId) continue;
+      const raw = (await this.redis.raw.eval(getdelScript, 1, key)) as
+        | string
+        | null;
+      const n = Number(raw ?? 0);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      const result = await this.prisma.listing.updateMany({
+        where: { id: listingId },
+        data: { viewCount: { increment: Math.floor(n) } },
+      });
+      if (result.count > 0) flushed += 1;
+    }
+
+    return flushed;
   }
 
   async listSimilar(

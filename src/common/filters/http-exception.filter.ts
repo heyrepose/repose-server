@@ -54,9 +54,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     if (statusCode >= 500) {
       this.logger.error(
-        `${statusCode} ${errorCode} ${message}`,
+        `${statusCode} ${errorCode} — ${message}`,
         exception instanceof Error ? exception.stack : undefined,
       );
+    } else if (
+      statusCode >= 400 &&
+      process.env.NODE_ENV !== 'production'
+    ) {
+      const detail =
+        details && Object.keys(details).length > 0
+          ? ` ${JSON.stringify(details)}`
+          : '';
+      this.logger.warn(`${statusCode} ${errorCode} — ${message}${detail}`);
     }
 
     response.status(statusCode).json({

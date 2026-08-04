@@ -61,6 +61,10 @@ export class PaymentsService {
     };
   }
 
+  isMockMode(): boolean {
+    return this.stripeProvider.isMock();
+  }
+
   async createIntentForOrder(orderId: string, amountAed: Decimal) {
     const intent = await this.provider.createPaymentIntent({
       orderId,
@@ -240,6 +244,10 @@ export class PaymentsService {
       });
       if (result.count > 0) {
         this.events.emit(ListingEvents.Removed, { listingId: item.listingId });
+        await this.prisma.user.update({
+          where: { id: item.sellerId },
+          data: { itemsSoldCount: { increment: 1 } },
+        });
       }
 
       await this.notifications.dispatch({
@@ -308,6 +316,34 @@ export class PaymentsService {
           null,
           'Charge refunded via Stripe',
         );
+        const items = await this.prisma.orderItem.findMany({
+          where: { orderId: payment.orderId },
+        });
+        for (const item of items) {
+          await this.prisma.user.updateMany({
+            where: {
+              id: item.sellerId,
+              itemsSoldCount: { gt: 0 },
+            },
+            data: { itemsSoldCount: { decrement: 1 } },
+          });
+          // Restore closet inventory when a sale is refunded.
+          const restored = await this.prisma.listing.updateMany({
+            where: {
+              id: item.listingId,
+              status: ListingStatus.SOLD,
+            },
+            data: {
+              status: ListingStatus.ACTIVE,
+              soldAt: null,
+            },
+          });
+          if (restored.count > 0) {
+            this.events.emit(ListingEvents.Changed, {
+              listingId: item.listingId,
+            });
+          }
+        }
       } catch (err) {
         this.logger.warn(
           `Could not transition order ${payment.orderId} to REFUNDED: ${(err as Error).message}`,

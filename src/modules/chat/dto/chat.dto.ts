@@ -53,6 +53,14 @@ export class CreateConversationDto {
   @IsOptional()
   @IsUUID()
   sellerId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'When the seller starts the chat (e.g. from an order), pass the buyer id',
+  })
+  @IsOptional()
+  @IsUUID()
+  buyerId?: string;
 }
 
 export class SendMessageDto {

@@ -33,7 +33,17 @@ describe('chat get-or-create helpers', () => {
         actorId: 'seller-1',
         listingSellerId: 'seller-1',
       }),
-    ).toEqual({ error: 'self' });
+    ).toEqual({ error: 'buyer_required' });
+  });
+
+  it('allows seller to start chat with a buyer', () => {
+    expect(
+      resolveConversationParties({
+        actorId: 'seller-1',
+        listingSellerId: 'seller-1',
+        buyerIdOverride: 'buyer-1',
+      }),
+    ).toEqual({ buyerId: 'buyer-1', sellerId: 'seller-1' });
   });
 
   it('rejects sellerId that does not match the listing seller', () => {

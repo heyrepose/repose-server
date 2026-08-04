@@ -51,6 +51,16 @@ export class UpdateListingDto {
   @IsOptional()
   @IsUUID()
   categoryId?: string;
+
+  @ApiPropertyOptional({ enum: ListingCondition })
+  @IsOptional()
+  @IsEnum(ListingCondition)
+  condition?: ListingCondition;
+
+  @ApiPropertyOptional({ example: '149.50', description: 'Decimal string AED' })
+  @IsOptional()
+  @IsString()
+  priceAed?: string;
 }
 
 export class PublishListingDto {

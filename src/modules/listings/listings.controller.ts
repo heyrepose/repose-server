@@ -92,6 +92,19 @@ export class ListingsController {
     return this.listings.publish(userId, id, dto);
   }
 
+  @ApiBearerAuth()
+  @Patch(':id/unpublish')
+  unpublish(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.listings.unpublish(userId, id);
+  }
+
+  @ApiBearerAuth()
+  @Post(':id/relist')
+  @HttpCode(201)
+  relist(@CurrentUser('id') userId: string, @Param('id') id: string) {
+    return this.listings.relist(userId, id);
+  }
+
   @SoftAuth()
   @Get(':id/similar')
   listSimilar(

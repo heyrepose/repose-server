@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
+import { buildLoggerParams } from './config/logger.config';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
 import { HealthModule } from './modules/health/health.module';
@@ -22,6 +23,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { CartModule } from './modules/cart/cart.module';
+import { SellerModule } from './modules/seller/seller.module';
 
 @Module({
   imports: [
@@ -30,16 +32,7 @@ import { CartModule } from './modules/cart/cart.module';
       cache: true,
       load: [configuration],
     }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        transport:
-          process.env.NODE_ENV === 'production'
-            ? undefined
-            : { target: 'pino-pretty', options: { singleLine: true } },
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
-        autoLogging: true,
-      },
-    }),
+    LoggerModule.forRoot(buildLoggerParams()),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 100 }]),
@@ -60,6 +53,7 @@ import { CartModule } from './modules/cart/cart.module';
     WalletModule,
     AdminModule,
     CartModule,
+    SellerModule,
   ],
 })
 export class AppModule {}

@@ -11,6 +11,7 @@ export function toProductCard(
   mainImageUrl: string | null;
   isFeatured?: boolean;
   status?: Listing['status'];
+  viewCount?: number;
 } {
   return {
     id: listing.id,
@@ -20,6 +21,7 @@ export function toProductCard(
     mainImageUrl: listing.images[0]?.url ?? null,
     isFeatured: listing.isFeatured,
     status: listing.status,
+    viewCount: listing.viewCount,
   };
 }
 

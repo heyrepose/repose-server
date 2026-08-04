@@ -50,9 +50,13 @@ export class ChatService {
       actorId: userId,
       listingSellerId: listing.sellerId,
       sellerIdOverride: dto.sellerId,
+      buyerIdOverride: dto.buyerId,
     });
     if ('error' in parties) {
       if (parties.error === 'self') throw new ChatCannotMessageSelfException();
+      if (parties.error === 'buyer_required') {
+        throw new ConversationForbiddenException();
+      }
       throw new ListingNotFoundException();
     }
     const { buyerId, sellerId } = parties;
@@ -363,11 +367,26 @@ export function resolveConversationParties(input: {
   actorId: string;
   listingSellerId: string;
   sellerIdOverride?: string;
-}): { buyerId: string; sellerId: string } | { error: 'self' | 'seller_mismatch' } {
+  buyerIdOverride?: string;
+}):
+  | { buyerId: string; sellerId: string }
+  | { error: 'self' | 'seller_mismatch' | 'buyer_required' } {
   const sellerId = input.sellerIdOverride ?? input.listingSellerId;
   if (input.sellerIdOverride && input.sellerIdOverride !== input.listingSellerId) {
     return { error: 'seller_mismatch' };
   }
-  if (input.actorId === sellerId) return { error: 'self' };
+  // Seller initiating chat with a specific buyer (order context).
+  if (input.actorId === sellerId) {
+    if (
+      input.buyerIdOverride &&
+      input.buyerIdOverride !== sellerId
+    ) {
+      return { buyerId: input.buyerIdOverride, sellerId };
+    }
+    return { error: input.buyerIdOverride ? 'self' : 'buyer_required' };
+  }
+  if (input.buyerIdOverride && input.buyerIdOverride !== input.actorId) {
+    return { error: 'seller_mismatch' };
+  }
   return { buyerId: input.actorId, sellerId };
 }

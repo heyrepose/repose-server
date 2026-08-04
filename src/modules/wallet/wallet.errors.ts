@@ -25,3 +25,13 @@ export class WalletNotFoundException extends DomainException {
     super('WALLET_NOT_FOUND', 'Seller wallet not found', 404);
   }
 }
+
+export class WalletDevCompleteUnavailableException extends DomainException {
+  constructor() {
+    super(
+      'WALLET_DEV_COMPLETE_UNAVAILABLE',
+      'Dev onboarding complete is only available in mock mode',
+      404,
+    );
+  }
+}

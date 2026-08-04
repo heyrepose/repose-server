@@ -12,6 +12,7 @@ import type { AppConfig } from '../../config/configuration';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
 import {
+  WalletDevCompleteUnavailableException,
   WalletInsufficientBalanceException,
   WalletOnboardingIncompleteException,
 } from './wallet.errors';
@@ -198,6 +199,33 @@ export class WalletService {
       where: { stripeAccountId },
       data: { onboardingComplete: true },
     });
+  }
+
+  /**
+   * Dev-only: mark Connect onboarding complete without a real Stripe Account Link.
+   * Mirrors POST /payments/dev/confirm for the mock payment path.
+   */
+  async completeOnboardingDev(userId: string) {
+    if (!this.payments.isMockMode()) {
+      throw new WalletDevCompleteUnavailableException();
+    }
+
+    const wallet = await this.ensureWallet(userId);
+    const stripeAccountId =
+      wallet.stripeAccountId ?? `acct_mock_${userId.replace(/-/g, '').slice(0, 16)}`;
+
+    const updated = await this.prisma.sellerWallet.update({
+      where: { id: wallet.id },
+      data: {
+        stripeAccountId,
+        onboardingComplete: true,
+      },
+    });
+
+    return {
+      onboardingComplete: updated.onboardingComplete,
+      stripeAccountId: updated.stripeAccountId,
+    };
   }
 
   async requireOnboardingComplete(userId: string): Promise<void> {

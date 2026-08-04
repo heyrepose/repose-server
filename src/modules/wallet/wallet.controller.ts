@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { WithdrawDto } from './dto/wallet.dto';
@@ -18,6 +18,13 @@ export class WalletController {
   @Post('onboard')
   onboard(@CurrentUser('id') userId: string) {
     return this.wallet.startOnboarding(userId);
+  }
+
+  /** Dev / mock mode only — marks Connect onboarding complete without Stripe. */
+  @Post('dev/complete-onboarding')
+  @HttpCode(200)
+  completeOnboardingDev(@CurrentUser('id') userId: string) {
+    return this.wallet.completeOnboardingDev(userId);
   }
 
   @Post('withdraw')

@@ -33,6 +33,15 @@ export class UsersController {
   }
 
   @ApiBearerAuth()
+  @Get('me/listings')
+  listMyListings(
+    @CurrentUser('id') userId: string,
+    @Query() query: ListSellerListingsDto,
+  ) {
+    return this.listings.listOwn(userId, query);
+  }
+
+  @ApiBearerAuth()
   @Patch('me')
   updateMe(@CurrentUser('id') userId: string, @Body() dto: UpdateProfileDto) {
     return this.users.updateMe(userId, dto);

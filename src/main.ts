@@ -24,7 +24,11 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({
-    origin: config.get('CORS_ORIGINS', { infer: true }).split(','),
+    origin: config
+      .get('CORS_ORIGINS', { infer: true })
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
     credentials: true,
   });
 

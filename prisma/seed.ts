@@ -1,17 +1,20 @@
 /**
- * Development seed — uploads local dummy images to Cloudinary and creates
+ * Development seed — uploads Stitch-generated images to Cloudinary and creates
  * users / listings / orders / wallet / chat / notifications / reviews covering
  * every enum status needed to exercise the MVP.
  *
- * Images: ../../documentation/dummy images/
+ * Images: ../../documentation/stitch_p2p_marketplace_asset_generator/
+ * (each subfolder contains screen.png)
+ *
  * Password for all seeded users (except admin from env): password123
  *
- * Run: pnpm prisma:seed
+ * Run: pnpm prisma:seed  (wipes previous seed rows)
  */
 import * as path from 'path';
 import * as fs from 'fs';
 import * as bcrypt from 'bcrypt';
 import { v2 as cloudinary } from 'cloudinary';
+import { MeiliSearch } from 'meilisearch';
 import {
   PrismaClient,
   ListingCondition,
@@ -25,12 +28,12 @@ import { Decimal } from '@prisma/client/runtime/library';
 
 const prisma = new PrismaClient();
 
-const DUMMY_DIR = path.resolve(
+const ASSETS_DIR = path.resolve(
   __dirname,
   '..',
   '..',
   'documentation',
-  'dummy images',
+  'stitch_p2p_marketplace_asset_generator',
 );
 
 const PASSWORD = 'password123';
@@ -65,48 +68,468 @@ function configureCloudinary(): void {
   console.log(`Cloudinary cloud: ${cloudinary.config().cloud_name}`);
 }
 
+/** Cache by asset folder so reused images upload once. */
 const uploadCache = new Map<string, string>();
 
-async function uploadDummy(filename: string, folder: string): Promise<string> {
-  const cacheKey = `${folder}/${filename}`;
-  if (uploadCache.has(cacheKey)) return uploadCache.get(cacheKey)!;
+/** Upload screen.png from a Stitch asset folder. */
+async function uploadAsset(
+  folderName: string,
+  publicId: string,
+  cloudFolder: string,
+): Promise<string> {
+  if (uploadCache.has(folderName)) return uploadCache.get(folderName)!;
 
-  const filePath = path.join(DUMMY_DIR, filename);
+  const filePath = path.join(ASSETS_DIR, folderName, 'screen.png');
   if (!fs.existsSync(filePath)) {
-    const fallback = path.join(DUMMY_DIR, 'avatar-placeholder.jpg');
-    if (!fs.existsSync(fallback)) {
-      throw new Error(`Missing dummy image: ${filename} (and no avatar-placeholder.jpg)`);
-    }
-    console.warn(`  missing ${filename} — using avatar-placeholder.jpg`);
-    return uploadDummy('avatar-placeholder.jpg', folder);
+    throw new Error(`Missing asset: ${folderName}/screen.png`);
   }
 
   const result = await cloudinary.uploader.upload(filePath, {
-    folder: `repose/seed/${folder}`,
-    public_id: path.parse(filename).name,
+    folder: `repose/seed/${cloudFolder}`,
+    public_id: publicId,
     overwrite: true,
     resource_type: 'image',
   });
-  uploadCache.set(cacheKey, result.secure_url);
-  console.log(`  ↑ ${filename}`);
+  uploadCache.set(folderName, result.secure_url);
+  console.log(`  ↑ ${publicId}`);
   return result.secure_url;
 }
+
+// ───────────────── Asset maps (Stitch folders) ─────────────────
+
+const AVATAR_FOLDERS: Record<string, string> = {
+  admin:
+    'realistic_portrait_of_a_professional_looking_middle_aged_woman_face_and',
+  amara:
+    'realistic_portrait_of_a_stylish_young_woman_amara_face_and_shoulders_natural',
+  noura:
+    'realistic_portrait_of_a_friendly_woman_in_her_30s_noura_face_and_shoulders',
+  khalid:
+    'realistic_portrait_of_a_young_man_khalid_face_and_shoulders_clean_and_modern',
+  sara: 'realistic_portrait_of_a_fashionable_young_woman_sara_face_and_shoulders_urban',
+  suspended:
+    'realistic_portrait_of_a_man_neutral_expression_face_and_shoulders_standard',
+  placeholder:
+    'generic_silhouette_or_a_very_neutral_non_descript_face_for_a_profile',
+};
+
+type ProductDef = {
+  key: string;
+  category: string;
+  title: string;
+  brand: string;
+  size: string;
+  condition: ListingCondition;
+  priceAed: number;
+  seller: 'amara' | 'noura';
+  status: ListingStatus;
+  isFeatured?: boolean;
+  publishedDaysAgo?: number | null;
+  soldDaysAgo?: number | null;
+  flagReason?: string;
+  main: string;
+  second?: string;
+  detail?: string;
+};
+
+const PRODUCTS: ProductDef[] = [
+  {
+    key: 'women-trench',
+    category: 'women',
+    title: 'Archive trench coat — rare find',
+    brand: 'Burberry',
+    size: 'M',
+    condition: 'NEW_WITH_TAGS',
+    priceAed: 1290,
+    seller: 'amara',
+    status: 'ACTIVE',
+    isFeatured: true,
+    publishedDaysAgo: 1,
+    main: 'main_product_photo_4_5_ratio_of_a_high_quality_vintage_trench_coat_archive_find',
+    second:
+      'second_angle_photo_of_the_trench_coat_image_12_close_up_of_the_storm_flap_and',
+    detail:
+      'close_up_photo_of_the_archive_brand_label_inside_the_collar_of_a_vintage_trench',
+  },
+  {
+    key: 'women-dress',
+    category: 'women',
+    title: 'Floral midi summer dress',
+    brand: 'Reformation',
+    size: 'S',
+    condition: 'VERY_GOOD',
+    priceAed: 220,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 3,
+    main: 'main_product_photo_4_5_ratio_of_a_beautiful_floral_midi_summer_dress_laid_flat',
+    second:
+      'second_angle_photo_of_the_floral_dress_image_13_close_up_of_the_fabric_print',
+    detail:
+      'close_up_photo_of_the_delicate_floral_print_fabric_and_adjustable_strap_buckle',
+  },
+  {
+    key: 'women-blazer',
+    category: 'women',
+    title: 'Structured navy wool blazer',
+    brand: 'Theory',
+    size: 'M',
+    condition: 'GOOD',
+    priceAed: 340,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 4,
+    main: 'main_product_photo_4_5_ratio_of_a_structured_navy_wool_blazer_archive_fashion',
+    second:
+      'second_angle_photo_of_the_navy_blazer_image_11_back_view_on_the_hanger_showing',
+    detail:
+      'close_up_photo_of_the_gold_tone_buttons_and_textured_navy_wool_fabric_of_a',
+  },
+  {
+    key: 'women-skirt',
+    category: 'women',
+    title: 'Pleated midi skirt',
+    brand: 'Uniqlo',
+    size: 'M',
+    condition: 'GOOD',
+    priceAed: 85,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 6,
+    main: 'main_product_photo_4_5_ratio_of_a_pleated_midi_skirt_high_quality_fabric',
+    second:
+      'second_angle_photo_of_the_pleated_skirt_image_10_close_up_of_the_waistband_and',
+    detail:
+      'close_up_photo_of_the_side_zipper_and_neat_pleat_transition_at_the_waistband_of',
+  },
+  {
+    key: 'women-knit',
+    category: 'women',
+    title: 'Cable knit wool sweater (draft)',
+    brand: 'Totême',
+    size: 'S',
+    condition: 'GOOD',
+    priceAed: 210,
+    seller: 'amara',
+    status: 'DRAFT',
+    publishedDaysAgo: null,
+    main: 'main_product_photo_4_5_ratio_of_a_cozy_wool_sweater_knit_laid_flat_on_a_clean',
+    second:
+      'second_angle_photo_of_the_wool_sweater_image_9_close_up_of_the_cable_knit',
+    detail:
+      'close_up_photo_of_the_thick_wool_cable_knit_pattern_and_the_brand_tag_of_a_cozy',
+  },
+  {
+    key: 'women-top',
+    category: 'women',
+    title: 'Silk blouse with soft drape',
+    brand: 'COS',
+    size: 'S',
+    condition: 'NEW_WITHOUT_TAGS',
+    priceAed: 195,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 2,
+    main: 'main_product_photo_4_5_ratio_of_a_silk_blouse_top_elegant_drape_fashion',
+    second:
+      'second_angle_photo_of_the_silk_blouse_image_6_side_view_on_the_mannequin',
+    detail:
+      'close_up_photo_of_the_material_composition_tag_and_fine_silk_texture_of_a_cream',
+  },
+  {
+    key: 'men-overshirt',
+    category: 'men',
+    title: 'Relaxed linen overshirt',
+    brand: 'COS',
+    size: 'L',
+    condition: 'VERY_GOOD',
+    priceAed: 175,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 3,
+    main: 'main_product_photo_4_5_ratio_of_a_casual_linen_overshirt_for_men_relaxed_fit',
+    second:
+      'second_angle_photo_of_the_linen_overshirt_image_8_close_up_of_the_cuff_and',
+    detail:
+      'close_up_photo_of_the_natural_linen_texture_and_chest_pocket_stitching_of_a_men',
+  },
+  {
+    key: 'men-blazer',
+    category: 'men',
+    title: 'Sold wool blazer',
+    brand: 'Acne Studios',
+    size: '48',
+    condition: 'GOOD',
+    priceAed: 560,
+    seller: 'noura',
+    status: 'SOLD',
+    publishedDaysAgo: 30,
+    soldDaysAgo: 8,
+    // Shares shoot with women-blazer (only one navy blazer set generated).
+    main: 'main_product_photo_4_5_ratio_of_a_structured_navy_wool_blazer_archive_fashion',
+    second:
+      'second_angle_photo_of_the_navy_blazer_image_11_back_view_on_the_hanger_showing',
+    detail:
+      'close_up_photo_of_the_gold_tone_buttons_and_textured_navy_wool_fabric_of_a',
+  },
+  {
+    key: 'men-trousers',
+    category: 'men',
+    title: 'Tailored wool trousers',
+    brand: 'J.Crew',
+    size: '32',
+    condition: 'VERY_GOOD',
+    priceAed: 160,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 5,
+    main: 'main_product_photo_4_5_ratio_of_tailored_men_s_trousers_clean_lines',
+    second:
+      'second_angle_photo_of_the_tailored_trousers_image_7_close_up_of_the_waistband',
+    detail:
+      'close_up_photo_of_the_inner_pocket_lining_and_tailored_seam_construction_of_men',
+  },
+  {
+    key: 'men-tee',
+    category: 'men',
+    title: 'Premium cotton polo',
+    brand: 'Lacoste',
+    size: 'M',
+    condition: 'GOOD',
+    priceAed: 120,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 7,
+    main: 'main_product_photo_4_5_ratio_of_a_premium_cotton_polo_shirt_marketplace_listing',
+    second:
+      'second_angle_photo_of_the_navy_polo_shirt_image_3_close_up_of_the_fabric',
+    detail:
+      'close_up_photo_of_the_fabric_weave_and_a_spare_button_attached_to_the_care',
+  },
+  {
+    key: 'shoes-loafers',
+    category: 'shoes',
+    title: 'Classic leather loafers',
+    brand: "Church's",
+    size: '42',
+    condition: 'GOOD',
+    priceAed: 320,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 5,
+    main: 'main_product_photo_4_5_ratio_of_classic_leather_loafers_detailed_texture',
+    second:
+      'second_angle_photo_of_the_leather_loafers_image_2_side_profile_view_showing_the',
+    detail:
+      'close_up_photo_of_the_inner_brand_stamp_and_hand_stitched_detailing_on_a_pair',
+  },
+  {
+    key: 'shoes-sneakers',
+    category: 'shoes',
+    title: 'Clean white leather sneakers',
+    brand: 'Common Projects',
+    size: '41',
+    condition: 'SATISFACTORY',
+    priceAed: 280,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 8,
+    main: 'main_product_photo_4_5_ratio_of_clean_white_leather_sneakers_modern_marketplace',
+    second:
+      'second_angle_photo_of_the_white_sneakers_image_4_back_view_showing_the_heel_tab',
+    detail:
+      'close_up_photo_of_the_textured_sole_and_clean_stitching_on_the_side_of_a_white',
+  },
+  {
+    key: 'shoes-heels',
+    category: 'shoes',
+    title: 'Black leather pointed pumps',
+    brand: 'Jimmy Choo',
+    size: '38',
+    condition: 'VERY_GOOD',
+    priceAed: 410,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 2,
+    main: 'main_product_photo_of_elegant_black_leather_high_heel_pumps_classic_pointed_toe',
+    second:
+      'second_angle_photo_of_the_black_high_heels_shoes_heels_01.jpg_side_profile_view',
+    detail:
+      'close_up_photo_of_the_inner_designer_label_and_clean_heel_tip_of_the_black_high',
+  },
+  {
+    key: 'shoes-sandals',
+    category: 'shoes',
+    title: 'Tan leather strappy sandals',
+    brand: 'Ancient Greek Sandals',
+    size: '39',
+    condition: 'GOOD',
+    priceAed: 190,
+    seller: 'noura',
+    status: 'REMOVED',
+    publishedDaysAgo: 40,
+    main: 'main_product_photo_of_tan_leather_strappy_sandals_minimalist_design_laid_flat',
+    second:
+      'second_angle_photo_of_the_tan_leather_sandals_shoes_sandals_01.jpg_top_down',
+  },
+  {
+    key: 'bags-tote',
+    category: 'bags',
+    title: 'Structured leather tote',
+    brand: 'Polène',
+    size: 'One size',
+    condition: 'NEW_WITHOUT_TAGS',
+    priceAed: 480,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 2,
+    main: 'main_product_photo_4_5_ratio_of_a_structured_leather_tote_bag_archive_designer',
+    second:
+      'second_angle_photo_of_the_structured_leather_tote_bag_image_1_showing_the',
+    detail:
+      'close_up_photo_of_a_designer_label_and_interior_lining_of_a_structured_leather',
+  },
+  {
+    key: 'bags-crossbody',
+    category: 'bags',
+    title: 'Sold mini leather crossbody',
+    brand: 'Jacquemus',
+    size: 'One size',
+    condition: 'VERY_GOOD',
+    priceAed: 390,
+    seller: 'amara',
+    status: 'SOLD',
+    publishedDaysAgo: 20,
+    soldDaysAgo: 12,
+    main: 'main_product_photo_4_5_ratio_equivalent_of_a_minimalist_leather_crossbody_bag',
+    second:
+      'second_angle_photo_of_the_olive_leather_crossbody_bag_bags_crossbody_01.jpg',
+    detail:
+      'close_up_photo_of_the_adjustable_strap_buckle_and_the_embossed_brand_logo_on',
+  },
+  {
+    key: 'bags-shoulder',
+    category: 'bags',
+    title: 'Cognac leather shoulder bag',
+    brand: 'Mansur Gavriel',
+    size: 'One size',
+    condition: 'GOOD',
+    priceAed: 350,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 9,
+    main: 'main_product_photo_4_5_ratio_equivalent_of_a_vintage_leather_shoulder_bag',
+    second:
+      'second_angle_photo_of_the_cognac_leather_shoulder_bag_bags_shoulder_01.jpg_side',
+  },
+  {
+    key: 'bags-clutch',
+    category: 'bags',
+    title: 'Black satin evening clutch',
+    brand: 'The Row',
+    size: 'One size',
+    condition: 'NEW_WITH_TAGS',
+    priceAed: 290,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 1,
+    main: 'main_product_photo_4_5_ratio_equivalent_of_an_elegant_evening_clutch_bag_black',
+    second:
+      'second_angle_photo_of_the_black_satin_evening_clutch_bags_clutch_01.jpg_showing',
+    detail:
+      'close_up_photo_of_the_inner_designer_label_and_magnetic_snap_closure_of_the',
+  },
+  {
+    key: 'acc-scarf',
+    category: 'accessories',
+    title: 'Silk square scarf',
+    brand: 'Hermès',
+    size: '90cm',
+    condition: 'VERY_GOOD',
+    priceAed: 650,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 1,
+    main: 'main_product_photo_4_5_ratio_of_a_silk_square_scarf_vibrant_pattern_laid_flat',
+    second:
+      'second_angle_photo_of_the_silk_scarf_image_5_folded_neatly_to_show_the_pattern',
+    detail:
+      'close_up_photo_of_the_rolled_hem_and_a_corner_of_the_intricate_pattern_on_a',
+  },
+  {
+    key: 'acc-belt',
+    category: 'accessories',
+    title: 'Dark brown leather belt',
+    brand: "Anderson's",
+    size: '85',
+    condition: 'GOOD',
+    priceAed: 95,
+    seller: 'noura',
+    status: 'ACTIVE',
+    publishedDaysAgo: 11,
+    main: 'main_product_photo_of_a_classic_leather_belt_dark_brown_with_a_brushed_brass',
+    second:
+      'second_angle_photo_of_the_brown_leather_belt_close_up_showing_the_buckle_detail',
+    detail:
+      'close_up_photo_of_the_adjustable_brass_buckle_and_fine_stitching_on_the_leather',
+  },
+  {
+    key: 'acc-sunglasses',
+    category: 'accessories',
+    title: 'Tortoiseshell wayfarer sunglasses',
+    brand: 'Ray-Ban',
+    size: 'One size',
+    condition: 'VERY_GOOD',
+    priceAed: 140,
+    seller: 'amara',
+    status: 'ACTIVE',
+    publishedDaysAgo: 4,
+    main: 'main_product_photo_of_stylish_tortoiseshell_sunglasses_classic_wayfarer_shape',
+    second:
+      'second_angle_photo_of_the_tortoiseshell_sunglasses_side_view_showing_the_hinge',
+  },
+  {
+    key: 'acc-watch',
+    category: 'accessories',
+    title: 'Flagged vintage gold-tone watch',
+    brand: 'Rolex',
+    size: 'One size',
+    condition: 'NEW_WITH_TAGS',
+    priceAed: 50,
+    seller: 'noura',
+    status: 'FLAGGED',
+    publishedDaysAgo: 4,
+    flagReason: 'COUNTERFEIT_SUSPECTED',
+    main: 'main_product_photo_4_5_ratio_equivalent_of_a_vintage_gold_tone_watch_with_a',
+    second:
+      'second_angle_photo_of_the_vintage_watch_acc_watch_01.jpg_side_profile_showing',
+    detail:
+      'close_up_photo_of_the_intricate_gold_tone_clasp_and_the_fabric_texture_of_the',
+  },
+];
+
+const CONDITION_EXTRAS: ListingCondition[] = [
+  'NEW_WITH_TAGS',
+  'NEW_WITHOUT_TAGS',
+  'VERY_GOOD',
+  'GOOD',
+  'SATISFACTORY',
+];
 
 // ───────────────────────── Categories ─────────────────────────
 
 const CATEGORIES = [
-  { name: 'Women', slug: 'women', sortOrder: 1, isActive: true, banner: 'category-women.jpg' },
-  { name: 'Men', slug: 'men', sortOrder: 2, isActive: true, banner: 'category-men.jpg' },
-  { name: 'Shoes', slug: 'shoes', sortOrder: 3, isActive: true, banner: 'category-shoes.jpg' },
-  { name: 'Bags', slug: 'bags', sortOrder: 4, isActive: true, banner: 'category-bags.jpg' },
+  { name: 'Women', slug: 'women', sortOrder: 1, isActive: true },
+  { name: 'Men', slug: 'men', sortOrder: 2, isActive: true },
+  { name: 'Shoes', slug: 'shoes', sortOrder: 3, isActive: true },
+  { name: 'Bags', slug: 'bags', sortOrder: 4, isActive: true },
   {
     name: 'Accessories',
     slug: 'accessories',
     sortOrder: 5,
     isActive: true,
-    banner: 'category-accessories.jpg',
   },
-  { name: 'Kids', slug: 'kids', sortOrder: 6, isActive: false, banner: null },
+  { name: 'Kids', slug: 'kids', sortOrder: 6, isActive: false },
 ] as const;
 
 // ───────────────────────── Helpers ─────────────────────────
@@ -147,17 +570,15 @@ async function wipeDevData(): Promise<void> {
 async function seedCategories() {
   console.log('Categories…');
   for (const c of CATEGORIES) {
-    const bannerUrl = c.banner
-      ? await uploadDummy(c.banner, 'categories')
-      : null;
+    // Icons are rendered in the client by slug (no banner/icon images).
     await prisma.category.create({
       data: {
         name: c.name,
         slug: c.slug,
         sortOrder: c.sortOrder,
         isActive: c.isActive,
-        bannerUrl,
-        iconUrl: bannerUrl,
+        bannerUrl: null,
+        iconUrl: null,
       },
     });
   }
@@ -171,12 +592,42 @@ async function seedUsers(passwordHash: string) {
     ? await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD, 12)
     : passwordHash;
 
-  const adminAvatar = await uploadDummy('avatar-admin.jpg', 'avatars');
-  const amaraAvatar = await uploadDummy('avatar-amara.jpg', 'avatars');
-  const nouraAvatar = await uploadDummy('avatar-noura.jpg', 'avatars');
-  const khalidAvatar = await uploadDummy('avatar-khalid.jpg', 'avatars');
-  const saraAvatar = await uploadDummy('avatar-sara.jpg', 'avatars');
-  const suspendedAvatar = await uploadDummy('avatar-suspended.jpg', 'avatars');
+  console.log('Uploading avatars…');
+  const adminAvatar = await uploadAsset(
+    AVATAR_FOLDERS.admin,
+    'avatar-admin',
+    'avatars',
+  );
+  const amaraAvatar = await uploadAsset(
+    AVATAR_FOLDERS.amara,
+    'avatar-amara',
+    'avatars',
+  );
+  const nouraAvatar = await uploadAsset(
+    AVATAR_FOLDERS.noura,
+    'avatar-noura',
+    'avatars',
+  );
+  const khalidAvatar = await uploadAsset(
+    AVATAR_FOLDERS.khalid,
+    'avatar-khalid',
+    'avatars',
+  );
+  const saraAvatar = await uploadAsset(
+    AVATAR_FOLDERS.sara,
+    'avatar-sara',
+    'avatars',
+  );
+  const suspendedAvatar = await uploadAsset(
+    AVATAR_FOLDERS.suspended,
+    'avatar-suspended',
+    'avatars',
+  );
+  const placeholderAvatar = await uploadAsset(
+    AVATAR_FOLDERS.placeholder,
+    'avatar-placeholder',
+    'avatars',
+  );
 
   const admin = await prisma.user.create({
     data: {
@@ -280,7 +731,7 @@ async function seedUsers(passwordHash: string) {
       status: 'BANNED',
       isPhoneVerified: true,
       passwordHash,
-      avatarUrl: await uploadDummy('avatar-placeholder.jpg', 'avatars'),
+      avatarUrl: placeholderAvatar,
     },
   });
 
@@ -354,24 +805,7 @@ async function seedListings(
   sellers: { amara: { id: string }; noura: { id: string } },
   cats: CatMap,
 ) {
-  console.log('Listings…');
-
-  const img = {
-    women: await uploadDummy('listing-women.jpg', 'listings'),
-    men: await uploadDummy('listing-men.jpg', 'listings'),
-    shoes: await uploadDummy('listing-shoes.jpg', 'listings'),
-    bags: await uploadDummy('listing-bags.jpg', 'listings'),
-    accessories: await uploadDummy('listing-accessories.jpg', 'listings'),
-    featured: await uploadDummy('listing-featured.jpg', 'listings'),
-  };
-
-  const conditions: ListingCondition[] = [
-    'NEW_WITH_TAGS',
-    'NEW_WITHOUT_TAGS',
-    'VERY_GOOD',
-    'GOOD',
-    'SATISFACTORY',
-  ];
+  console.log('Listings (Stitch multi-image products)…');
 
   async function createListing(opts: {
     sellerId: string;
@@ -382,7 +816,7 @@ async function seedListings(
     condition: ListingCondition | null;
     priceAed: number | null;
     status: ListingStatus;
-    imageUrl: string;
+    imageUrls: string[];
     isFeatured?: boolean;
     publishedAt?: Date | null;
     soldAt?: Date | null;
@@ -404,196 +838,109 @@ async function seedListings(
         attributes: opts.attributes ?? undefined,
         viewCount: Math.floor(Math.random() * 200),
         images: {
-          create: [{ url: opts.imageUrl, sortOrder: 0 }],
+          create: opts.imageUrls.map((url, i) => ({
+            url,
+            sortOrder: i,
+          })),
         },
       },
     });
   }
 
-  // One ACTIVE listing per condition (women) — browse + badges
+  async function uploadProductImages(
+    p: ProductDef,
+  ): Promise<string[]> {
+    const urls: string[] = [];
+    urls.push(await uploadAsset(p.main, `${p.key}-01`, 'listings'));
+    if (p.second) {
+      urls.push(await uploadAsset(p.second, `${p.key}-02`, 'listings'));
+    }
+    if (p.detail) {
+      urls.push(await uploadAsset(p.detail, `${p.key}-03`, 'listings'));
+    }
+    return urls;
+  }
+
+  const byKey: Record<string, Awaited<ReturnType<typeof createListing>>> = {};
+
+  for (const p of PRODUCTS) {
+    const cat = cats[p.category];
+    if (!cat) throw new Error(`Missing category slug: ${p.category}`);
+    const sellerId =
+      p.seller === 'amara' ? sellers.amara.id : sellers.noura.id;
+
+    const imageUrls = await uploadProductImages(p);
+    byKey[p.key] = await createListing({
+      sellerId,
+      categoryId: cat.id,
+      title: p.title,
+      brand: p.brand,
+      size: p.size,
+      condition: p.condition,
+      priceAed: p.priceAed,
+      status: p.status,
+      imageUrls,
+      isFeatured: p.isFeatured,
+      publishedAt:
+        p.publishedDaysAgo == null
+          ? null
+          : daysAgo(p.publishedDaysAgo),
+      soldAt:
+        p.soldDaysAgo != null ? daysAgo(p.soldDaysAgo) : undefined,
+      attributes: p.flagReason
+        ? {
+            flagReason: p.flagReason,
+            flaggedAt: new Date().toISOString(),
+          }
+        : undefined,
+    });
+  }
+
+  // One ACTIVE listing per condition — reuses dress shoot for demo badges
+  const dressImages = [
+    await uploadAsset(
+      'main_product_photo_4_5_ratio_of_a_beautiful_floral_midi_summer_dress_laid_flat',
+      'cond-dress-01',
+      'listings',
+    ),
+    await uploadAsset(
+      'second_angle_photo_of_the_floral_dress_image_13_close_up_of_the_fabric_print',
+      'cond-dress-02',
+      'listings',
+    ),
+  ];
+
   const byCondition = [];
-  for (let i = 0; i < conditions.length; i++) {
+  for (let i = 0; i < CONDITION_EXTRAS.length; i++) {
     byCondition.push(
       await createListing({
         sellerId: sellers.amara.id,
         categoryId: cats.women.id,
-        title: `Condition demo — ${conditions[i].replace(/_/g, ' ').toLowerCase()}`,
+        title: `Condition demo — ${CONDITION_EXTRAS[i].replace(/_/g, ' ').toLowerCase()}`,
         brand: ['Burberry', 'Zara', 'COS', 'Mango', 'H&M'][i],
         size: ['S', 'M', 'L', 'M', 'S'][i],
-        condition: conditions[i],
+        condition: CONDITION_EXTRAS[i],
         priceAed: 89 + i * 30,
         status: 'ACTIVE',
-        imageUrl: img.women,
+        imageUrls: dressImages,
         publishedAt: daysAgo(10 - i),
       }),
     );
   }
 
-  const menActive = await createListing({
-    sellerId: sellers.noura.id,
-    categoryId: cats.men.id,
-    title: 'Relaxed linen overshirt',
-    brand: 'COS',
-    size: 'L',
-    condition: 'VERY_GOOD',
-    priceAed: 175,
-    status: 'ACTIVE',
-    imageUrl: img.men,
-    publishedAt: daysAgo(3),
-  });
-
-  const shoesActive = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.shoes.id,
-    title: 'Leather loafers',
-    brand: 'Church\'s',
-    size: '42',
-    condition: 'GOOD',
-    priceAed: 320,
-    status: 'ACTIVE',
-    imageUrl: img.shoes,
-    publishedAt: daysAgo(5),
-  });
-
-  const bagsActive = await createListing({
-    sellerId: sellers.noura.id,
-    categoryId: cats.bags.id,
-    title: 'Structured tote',
-    brand: 'Polène',
-    size: 'One size',
-    condition: 'NEW_WITHOUT_TAGS',
-    priceAed: 480,
-    status: 'ACTIVE',
-    imageUrl: img.bags,
-    publishedAt: daysAgo(2),
-  });
-
-  const accessoriesActive = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.accessories.id,
-    title: 'Silk square scarf',
-    brand: 'Hermès',
-    size: '90cm',
-    condition: 'VERY_GOOD',
-    priceAed: 650,
-    status: 'ACTIVE',
-    imageUrl: img.accessories,
-    publishedAt: daysAgo(1),
-  });
-
-  const featured = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.women.id,
-    title: 'Archive trench — Rare Find',
-    brand: 'Burberry',
-    size: 'M',
-    condition: 'NEW_WITH_TAGS',
-    priceAed: 1290,
-    status: 'ACTIVE',
-    imageUrl: img.featured,
-    isFeatured: true,
-    publishedAt: daysAgo(1),
-  });
-
-  // Status variants
-  const draft = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.women.id,
-    title: 'Draft knit (unpublished)',
-    brand: 'Totême',
-    size: 'S',
-    condition: 'GOOD',
-    priceAed: 210,
-    status: 'DRAFT',
-    imageUrl: img.women,
-    publishedAt: null,
-  });
-
-  const sold1 = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.bags.id,
-    title: 'Sold mini crossbody',
-    brand: 'Jacquemus',
-    size: 'One size',
-    condition: 'VERY_GOOD',
-    priceAed: 390,
-    status: 'SOLD',
-    imageUrl: img.bags,
-    publishedAt: daysAgo(20),
-    soldAt: daysAgo(12),
-  });
-
-  const sold2 = await createListing({
-    sellerId: sellers.noura.id,
-    categoryId: cats.men.id,
-    title: 'Sold wool blazer',
-    brand: 'Acne Studios',
-    size: '48',
-    condition: 'GOOD',
-    priceAed: 560,
-    status: 'SOLD',
-    imageUrl: img.men,
-    publishedAt: daysAgo(30),
-    soldAt: daysAgo(8),
-  });
-
-  const flagged = await createListing({
-    sellerId: sellers.noura.id,
-    categoryId: cats.accessories.id,
-    title: 'Flagged — counterfeit check',
-    brand: 'Rolex',
-    size: 'One size',
-    condition: 'NEW_WITH_TAGS',
-    priceAed: 50,
-    status: 'FLAGGED',
-    imageUrl: img.accessories,
-    publishedAt: daysAgo(4),
-    attributes: {
-      flagReason: 'COUNTERFEIT_SUSPECTED',
-      flaggedAt: new Date().toISOString(),
-    },
-  });
-
-  const removed = await createListing({
-    sellerId: sellers.amara.id,
-    categoryId: cats.shoes.id,
-    title: 'Removed sneaker listing',
-    brand: 'Nike',
-    size: '41',
-    condition: 'SATISFACTORY',
-    priceAed: 95,
-    status: 'REMOVED',
-    imageUrl: img.shoes,
-    publishedAt: daysAgo(40),
-  });
-
-  // Extra active for feed volume
-  await createListing({
-    sellerId: sellers.noura.id,
-    categoryId: cats.women.id,
-    title: 'Pleated midi skirt',
-    brand: 'Uniqlo',
-    size: 'M',
-    condition: 'GOOD',
-    priceAed: 85,
-    status: 'ACTIVE',
-    imageUrl: img.women,
-    publishedAt: daysAgo(6),
-  });
-
   return {
+    byKey,
     byCondition,
-    menActive,
-    shoesActive,
-    bagsActive,
-    accessoriesActive,
-    featured,
-    draft,
-    sold1,
-    sold2,
-    flagged,
-    removed,
-    img,
+    menActive: byKey['men-overshirt'],
+    shoesActive: byKey['shoes-loafers'],
+    bagsActive: byKey['bags-tote'],
+    accessoriesActive: byKey['acc-scarf'],
+    featured: byKey['women-trench'],
+    draft: byKey['women-knit'],
+    sold1: byKey['bags-crossbody'],
+    sold2: byKey['men-blazer'],
+    flagged: byKey['acc-watch'],
+    removed: byKey['shoes-sandals'],
   };
 }
 
@@ -670,7 +1017,8 @@ async function createOrder(opts: {
             opts.paymentStatus === 'RELEASED'
               ? opts.createdAt
               : undefined,
-          releasedAt: opts.paymentStatus === 'RELEASED' ? opts.deliveredAt : undefined,
+          releasedAt:
+            opts.paymentStatus === 'RELEASED' ? opts.deliveredAt : undefined,
         },
       },
       statusHistory: {
@@ -809,7 +1157,13 @@ async function seedOrders(
     trackingNumber: 'AWB-SEED-4004',
     shippedAt: daysAgo(11),
     deliveredAt: daysAgo(7),
-    history: ['PENDING_PAYMENT', 'PAID_HELD', 'SHIPPED', 'DELIVERED', 'DISPUTED'],
+    history: [
+      'PENDING_PAYMENT',
+      'PAID_HELD',
+      'SHIPPED',
+      'DELIVERED',
+      'DISPUTED',
+    ],
     createdAt: daysAgo(15),
   });
   await prisma.order.updateMany({
@@ -1020,12 +1374,89 @@ async function seedEngagement(
   });
 }
 
+/**
+ * Seed writes listings via Prisma (not ListingsService), so listing.changed
+ * events never fire and Bull never indexes. Rebuild Meili for explore/search.
+ */
+async function reindexMeilisearch(): Promise<void> {
+  const host = process.env.MEILISEARCH_HOST?.trim();
+  if (!host) {
+    console.warn('MEILISEARCH_HOST unset — skip search reindex (explore will be empty)');
+    return;
+  }
+
+  console.log('Meilisearch reindex…');
+  const client = new MeiliSearch({
+    host,
+    apiKey: process.env.MEILISEARCH_API_KEY,
+  });
+  const indexUid = 'listings';
+
+  await client.createIndex(indexUid, { primaryKey: 'id' }).catch(() => undefined);
+  const index = client.index(indexUid);
+  await index.updateSettings({
+    searchableAttributes: ['title', 'brand', 'description'],
+    filterableAttributes: [
+      'categoryId',
+      'condition',
+      'brand',
+      'size',
+      'priceAed',
+      'status',
+      'isFeatured',
+    ],
+    sortableAttributes: ['priceAed', 'publishedAt'],
+    rankingRules: [
+      'words',
+      'typo',
+      'proximity',
+      'attribute',
+      'sort',
+      'exactness',
+    ],
+  });
+
+  await index.deleteAllDocuments();
+
+  const active = await prisma.listing.findMany({
+    where: { status: 'ACTIVE' },
+    include: {
+      images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+      category: { select: { slug: true } },
+    },
+  });
+
+  const docs = active.map((listing) => ({
+    id: listing.id,
+    title: listing.title ?? '',
+    description: listing.description ?? '',
+    brand: listing.brand ?? '',
+    size: listing.size ?? '',
+    condition: listing.condition ?? '',
+    categoryId: listing.categoryId,
+    categorySlug: listing.category.slug,
+    priceAed: listing.priceAed ? Number(listing.priceAed) : 0,
+    mainImageUrl: listing.images[0]?.url ?? null,
+    sellerId: listing.sellerId,
+    isFeatured: listing.isFeatured,
+    publishedAt: listing.publishedAt ? listing.publishedAt.getTime() : 0,
+    status: listing.status,
+  }));
+
+  if (docs.length) {
+    const task = await index.addDocuments(docs);
+    await client.waitForTask(task.taskUid, { timeOutMs: 60_000 });
+  }
+
+  console.log(`  indexed ${docs.length} ACTIVE listings`);
+}
+
 async function main() {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to run full wipe seed in production');
   }
-  if (!fs.existsSync(DUMMY_DIR)) {
-    throw new Error(`Dummy images folder not found: ${DUMMY_DIR}`);
+  if (!fs.existsSync(ASSETS_DIR)) {
+    throw new Error(`Stitch assets folder not found: ${ASSETS_DIR}`);
   }
 
   configureCloudinary();
@@ -1047,14 +1478,20 @@ async function main() {
   const orders = await seedOrders(users, addresses, listings);
   await seedWalletLedger(users.amara.id, orders.released.id);
   await seedEngagement(users, listings, orders);
+  // After order side-effects flip some ACTIVE → SOLD
+  await reindexMeilisearch();
 
   console.log('\n──────── Seed complete ────────');
   console.log('Login password for demo users: password123');
-  console.log(`Admin: ${process.env.SEED_ADMIN_EMAIL ?? 'admin@repose.ae'} (SEED_ADMIN_PASSWORD)`);
+  console.log(
+    `Admin: ${process.env.SEED_ADMIN_EMAIL ?? 'admin@repose.ae'} (SEED_ADMIN_PASSWORD)`,
+  );
   console.log('Sellers: amara@repose.ae, noura@repose.ae');
   console.log('Buyers:  khalid@repose.ae, sara@repose.ae');
   console.log('Also:    suspended@repose.ae, banned@repose.ae');
-  console.log(`Listings: ${await prisma.listing.count()}  Orders: ${await prisma.order.count()}`);
+  console.log(
+    `Listings: ${await prisma.listing.count()}  Orders: ${await prisma.order.count()}  Images: ${await prisma.listingImage.count()}`,
+  );
 }
 
 main()
