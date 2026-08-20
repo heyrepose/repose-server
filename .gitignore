@@ -7,7 +7,7 @@ build/
 coverage/
 .turbo/
 
-# Env & secrets (including *.example / *.development)
+# Env & secrets — backend uses only `.env` (never commit it)
 .env
 .env.*
 *.env

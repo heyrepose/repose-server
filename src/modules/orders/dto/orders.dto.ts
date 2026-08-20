@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OrderStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsEnum,
@@ -17,9 +18,11 @@ import {
 } from 'class-validator';
 
 export class CreateOrderDto {
-  @ApiProperty({ type: [String], example: ['uuid'] })
+  /** P2P: exactly one listing per order (checkout each bag item separately). */
+  @ApiProperty({ type: [String], example: ['uuid'], minItems: 1, maxItems: 1 })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(1)
   @IsUUID('4', { each: true })
   listingIds!: string[];
 

@@ -2,16 +2,16 @@
  * One-off: rebuild Meilisearch from active Postgres listings.
  * Usage: npx ts-node scripts/reindex-search.ts
  */
-import * as fs from 'fs';
-import * as path from 'path';
-import { PrismaClient } from '@prisma/client';
-import { MeiliSearch } from 'meilisearch';
+import * as fs from "fs";
+import * as path from "path";
+import { PrismaClient } from "@prisma/client";
+import { MeiliSearch } from "meilisearch";
 
 for (const line of fs
-  .readFileSync(path.join(__dirname, '..', '.env'), 'utf8')
+  .readFileSync(path.join(__dirname, "..", ".env"), "utf8")
   .split(/\r?\n/)) {
-  if (!line || line.startsWith('#')) continue;
-  const i = line.indexOf('=');
+  if (!line || line.startsWith("#")) continue;
+  const i = line.indexOf("=");
   if (i < 0) continue;
   const k = line.slice(0, i);
   const v = line.slice(i + 1);
@@ -22,53 +22,56 @@ const prisma = new PrismaClient();
 
 async function main() {
   const host = process.env.MEILISEARCH_HOST?.trim();
-  if (!host) throw new Error('MEILISEARCH_HOST missing');
+  if (!host) throw new Error("MEILISEARCH_HOST missing");
 
   const client = new MeiliSearch({
     host,
     apiKey: process.env.MEILISEARCH_API_KEY,
   });
-  const indexUid = 'listings';
-  await client.createIndex(indexUid, { primaryKey: 'id' }).catch(() => undefined);
+  const indexUid = "listings";
+  await client
+    .createIndex(indexUid, { primaryKey: "id" })
+    .catch(() => undefined);
   const index = client.index(indexUid);
   await index.updateSettings({
-    searchableAttributes: ['title', 'brand', 'description'],
+    searchableAttributes: ["title", "brand", "description", "categorySlug"],
     filterableAttributes: [
-      'categoryId',
-      'condition',
-      'brand',
-      'size',
-      'priceAed',
-      'status',
-      'isFeatured',
+      "categoryId",
+      "categorySlug",
+      "condition",
+      "brand",
+      "size",
+      "priceAed",
+      "status",
+      "isFeatured",
     ],
-    sortableAttributes: ['priceAed', 'publishedAt'],
+    sortableAttributes: ["priceAed", "publishedAt"],
     rankingRules: [
-      'words',
-      'typo',
-      'proximity',
-      'attribute',
-      'sort',
-      'exactness',
+      "sort",
+      "words",
+      "typo",
+      "proximity",
+      "attribute",
+      "exactness",
     ],
   });
   await index.deleteAllDocuments();
 
   const active = await prisma.listing.findMany({
-    where: { status: 'ACTIVE' },
+    where: { status: "ACTIVE" },
     include: {
-      images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+      images: { orderBy: { sortOrder: "asc" }, take: 1 },
       category: { select: { slug: true } },
     },
   });
 
   const docs = active.map((listing) => ({
     id: listing.id,
-    title: listing.title ?? '',
-    description: listing.description ?? '',
-    brand: listing.brand ?? '',
-    size: listing.size ?? '',
-    condition: listing.condition ?? '',
+    title: listing.title ?? "",
+    description: listing.description ?? "",
+    brand: listing.brand ?? "",
+    size: listing.size ?? "",
+    condition: listing.condition ?? "",
     categoryId: listing.categoryId,
     categorySlug: listing.category.slug,
     priceAed: listing.priceAed ? Number(listing.priceAed) : 0,
@@ -86,13 +89,13 @@ async function main() {
 
   console.log(`Indexed ${docs.length} ACTIVE listings`);
 
-  const search = await fetch('http://localhost:4000/api/v1/search?limit=5').then(
-    (r) => r.json(),
-  );
+  const search = await fetch(
+    "http://localhost:4000/api/v1/search?limit=5",
+  ).then((r) => r.json());
   console.log(
-    'search resultCount:',
+    "search resultCount:",
     search?.meta?.resultCount,
-    'titles:',
+    "titles:",
     (search?.data ?? []).map((d: { title: string }) => d.title),
   );
 }

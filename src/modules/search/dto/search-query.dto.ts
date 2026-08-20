@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsIn,
@@ -11,9 +11,14 @@ import {
   Min,
 } from 'class-validator';
 
-const toArray = ({ value }: { value: unknown }): string[] | undefined => {
-  if (value === undefined) return undefined;
-  return Array.isArray(value) ? value : [value as string];
+/** Single value, repeated keys, or comma-separated → clean string[]. */
+const toStringArray = ({ value }: { value: unknown }): string[] | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  const parts = Array.isArray(value)
+    ? value.flatMap((v) => String(v).split(','))
+    : String(value).split(',');
+  const cleaned = parts.map((s) => s.trim()).filter(Boolean);
+  return cleaned.length ? cleaned : undefined;
 };
 
 export class SearchQueryDto {
@@ -32,32 +37,49 @@ export class SearchQueryDto {
   @IsUUID()
   categoryId?: string;
 
-  @ApiPropertyOptional({ isArray: true, type: String })
+  @ApiPropertyOptional({
+    isArray: true,
+    type: String,
+    description: 'Condition enum(s); comma-separated or repeated',
+  })
   @IsOptional()
-  @Transform(toArray)
+  @Transform(toStringArray)
   @IsArray()
+  @IsString({ each: true })
   condition?: string[];
 
-  @ApiPropertyOptional({ isArray: true, type: String })
+  @ApiPropertyOptional({
+    isArray: true,
+    type: String,
+    description: 'Brand(s); comma-separated or repeated',
+  })
   @IsOptional()
-  @Transform(toArray)
+  @Transform(toStringArray)
   @IsArray()
+  @IsString({ each: true })
   brand?: string[];
 
-  @ApiPropertyOptional({ isArray: true, type: String })
+  @ApiPropertyOptional({
+    isArray: true,
+    type: String,
+    description: 'Size(s); comma-separated or repeated',
+  })
   @IsOptional()
-  @Transform(toArray)
+  @Transform(toStringArray)
   @IsArray()
+  @IsString({ each: true })
   size?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   minPrice?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   maxPrice?: number;
@@ -76,6 +98,7 @@ export class SearchQueryDto {
 
   @ApiPropertyOptional({ default: 20 })
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(1)
   @Max(50)

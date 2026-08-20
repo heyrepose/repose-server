@@ -5,11 +5,14 @@ export const SEARCH_PROVIDER = Symbol('SEARCH_PROVIDER');
 export interface SearchQuery {
   q?: string;
   categoryId?: string;
+  /** Prefer when filtering by public category slug (indexed on documents). */
+  categorySlug?: string;
   condition?: string[];
   brand?: string[];
   size?: string[];
   minPriceAed?: number;
   maxPriceAed?: number;
+  /** Omit or undefined = Meilisearch relevance ranking. */
   sort?: 'newest' | 'price_asc' | 'price_desc';
   limit: number;
   offset: number;

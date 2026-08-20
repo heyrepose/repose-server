@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { ListingCondition, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import {
@@ -50,25 +51,50 @@ export class SearchService implements OnModuleInit {
   async searchListings(dto: SearchQueryDto) {
     const limit = Math.min(dto.limit ?? 20, 50);
     const offset = decodeOffset(dto.cursor);
+    const sort =
+      dto.sort === 'relevance' || !dto.sort ? undefined : dto.sort;
 
     let categoryId = dto.categoryId;
-    // API contract uses `category` as slug — support both for flexibility.
-    const slug = (dto as SearchQueryDto & { category?: string }).category;
+    const slug = dto.category?.trim();
     if (!categoryId && slug) {
-      const cat = await this.prisma.category.findUnique({ where: { slug } });
-      categoryId = cat?.id;
+      const cat = await this.prisma.category.findUnique({
+        where: { slug },
+      });
+      if (!cat) {
+        return {
+          data: [],
+          meta: {
+            nextCursor: null,
+            resultCount: 0,
+            facets: { brand: [], size: [], condition: [] },
+          },
+        };
+      }
+      categoryId = cat.id;
+    }
+
+    // Swap min/max if client sent them inverted.
+    let minPrice = dto.minPrice;
+    let maxPrice = dto.maxPrice;
+    if (
+      minPrice !== undefined &&
+      maxPrice !== undefined &&
+      minPrice > maxPrice
+    ) {
+      [minPrice, maxPrice] = [maxPrice, minPrice];
     }
 
     try {
       const result = await this.search.search({
-        q: dto.q,
+        q: dto.q?.trim() || undefined,
         categoryId,
+        categorySlug: slug,
         condition: dto.condition,
         brand: dto.brand,
         size: dto.size,
-        minPriceAed: dto.minPrice,
-        maxPriceAed: dto.maxPrice,
-        sort: dto.sort === 'relevance' ? undefined : dto.sort,
+        minPriceAed: minPrice,
+        maxPriceAed: maxPrice,
+        sort,
         limit,
         offset,
       });
@@ -76,34 +102,39 @@ export class SearchService implements OnModuleInit {
       const data = result.hits.map((h) => ({
         id: h.id,
         title: h.title,
-        priceAed: h.priceAed.toFixed(2),
+        priceAed:
+          typeof h.priceAed === 'number'
+            ? h.priceAed.toFixed(2)
+            : String(h.priceAed ?? '0'),
         condition: h.condition,
         mainImageUrl: h.mainImageUrl,
       }));
 
-      const facets: Record<string, Array<{ value: string; count: number }>> = {};
-      if (result.facets) {
-        for (const [key, dist] of Object.entries(result.facets)) {
-          facets[key] = Object.entries(dist).map(([value, count]) => ({
-            value,
-            count,
-          }));
-        }
-      }
+      const facets = this.mapFacets(result.facets);
 
       const nextOffset = offset + data.length;
       return {
         data,
         meta: {
           nextCursor:
-            nextOffset < result.estimatedTotal ? encodeOffset(nextOffset) : null,
+            nextOffset < result.estimatedTotal
+              ? encodeOffset(nextOffset)
+              : null,
           resultCount: result.estimatedTotal,
           facets,
         },
       };
     } catch (err) {
-      this.logger.warn(`Meilisearch search failed, falling back to Postgres: ${(err as Error).message}`);
-      return this.postgresFallback(dto, limit, offset, categoryId);
+      this.logger.warn(
+        `Meilisearch search failed, falling back to Postgres: ${(err as Error).message}`,
+      );
+      return this.postgresFallback(
+        { ...dto, minPrice, maxPrice },
+        limit,
+        offset,
+        categoryId,
+        sort,
+      );
     }
   }
 
@@ -152,39 +183,172 @@ export class SearchService implements OnModuleInit {
     });
 
     const payload = {
-      trendingTags: ['90s Denim', 'Silk Scarves', 'Tailored'],
+      trendingTags: ['Leather', 'Silk', 'Blazer', 'Loafers', 'Burberry'],
       sections,
     };
 
-    await this.redis.set(cacheKey, JSON.stringify(payload), 60).catch(() => undefined);
+    await this.redis
+      .set(cacheKey, JSON.stringify(payload), 60)
+      .catch(() => undefined);
     return payload;
+  }
+
+  private mapFacets(
+    raw?: Record<string, Record<string, number>>,
+  ): Record<string, Array<{ value: string; count: number }>> {
+    const facets: Record<string, Array<{ value: string; count: number }>> = {
+      brand: [],
+      size: [],
+      condition: [],
+    };
+    if (!raw) return facets;
+    for (const key of ['brand', 'size', 'condition'] as const) {
+      const dist = raw[key];
+      if (!dist) continue;
+      facets[key] = Object.entries(dist)
+        .filter(([value]) => value !== '')
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+    }
+    return facets;
   }
 
   private async postgresFallback(
     dto: SearchQueryDto,
     limit: number,
     offset: number,
-    categoryId?: string,
+    categoryId: string | undefined,
+    sort: 'newest' | 'price_asc' | 'price_desc' | undefined,
   ) {
-    const rows = await this.prisma.listing.findMany({
-      where: {
-        status: 'ACTIVE',
-        ...(categoryId ? { categoryId } : {}),
-        ...(dto.q
-          ? {
-              OR: [
-                { title: { contains: dto.q, mode: 'insensitive' } },
-                { brand: { contains: dto.q, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
-      include: { images: { orderBy: { sortOrder: 'asc' }, take: 1 } },
-      orderBy: { publishedAt: 'desc' },
-      skip: offset,
-      take: limit + 1,
-    });
+    const where: Prisma.ListingWhereInput = {
+      status: 'ACTIVE',
+      ...(categoryId ? { categoryId } : {}),
+      ...(dto.condition?.length
+        ? {
+            condition: {
+              in: dto.condition.filter((c): c is ListingCondition =>
+                (
+                  [
+                    'NEW_WITH_TAGS',
+                    'NEW_WITHOUT_TAGS',
+                    'VERY_GOOD',
+                    'GOOD',
+                    'SATISFACTORY',
+                  ] as string[]
+                ).includes(c),
+              ),
+            },
+          }
+        : {}),
+      ...(dto.brand?.length
+        ? {
+            OR: dto.brand.map((b) => ({
+              brand: { equals: b, mode: 'insensitive' as const },
+            })),
+          }
+        : {}),
+      ...(dto.size?.length
+        ? {
+            OR: dto.size.map((s) => ({
+              size: { equals: s, mode: 'insensitive' as const },
+            })),
+          }
+        : {}),
+      ...(dto.minPrice !== undefined || dto.maxPrice !== undefined
+        ? {
+            priceAed: {
+              ...(dto.minPrice !== undefined
+                ? { gte: dto.minPrice }
+                : {}),
+              ...(dto.maxPrice !== undefined
+                ? { lte: dto.maxPrice }
+                : {}),
+            },
+          }
+        : {}),
+      ...(dto.q?.trim()
+        ? {
+            OR: [
+              {
+                title: {
+                  contains: dto.q.trim(),
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                brand: {
+                  contains: dto.q.trim(),
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                description: {
+                  contains: dto.q.trim(),
+                  mode: 'insensitive' as const,
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const orderBy: Prisma.ListingOrderByWithRelationInput[] =
+      sort === 'price_asc'
+        ? [{ priceAed: 'asc' }, { publishedAt: 'desc' }]
+        : sort === 'price_desc'
+          ? [{ priceAed: 'desc' }, { publishedAt: 'desc' }]
+          : [{ isFeatured: 'desc' }, { publishedAt: 'desc' }];
+
+    const [rows, resultCount, brandGroups, sizeGroups, conditionGroups] =
+      await Promise.all([
+        this.prisma.listing.findMany({
+          where,
+          include: {
+            images: { orderBy: { sortOrder: 'asc' }, take: 1 },
+          },
+          orderBy,
+          skip: offset,
+          take: limit + 1,
+        }),
+        this.prisma.listing.count({ where }),
+        this.prisma.listing.groupBy({
+          by: ['brand'],
+          where: { ...where, brand: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { brand: 'desc' } },
+          take: 40,
+        }),
+        this.prisma.listing.groupBy({
+          by: ['size'],
+          where: { ...where, size: { not: null } },
+          _count: { _all: true },
+          orderBy: { _count: { size: 'desc' } },
+          take: 40,
+        }),
+        this.prisma.listing.groupBy({
+          by: ['condition'],
+          where: { ...where, condition: { not: null } },
+          _count: { _all: true },
+        }),
+      ]);
+
     const page = rows.slice(0, limit);
+    const facets = {
+      brand: brandGroups
+        .filter((g) => g.brand)
+        .map((g) => ({ value: g.brand as string, count: g._count._all })),
+      size: sizeGroups
+        .filter((g) => g.size)
+        .map((g) => ({ value: g.size as string, count: g._count._all })),
+      condition: conditionGroups
+        .filter((g) => g.condition)
+        .map((g) => ({
+          value: g.condition as string,
+          count: g._count._all,
+        }))
+        .sort((a, b) => b.count - a.count),
+    };
+
     return {
       data: page.map((r) => ({
         id: r.id,
@@ -194,9 +358,10 @@ export class SearchService implements OnModuleInit {
         mainImageUrl: r.images[0]?.url ?? null,
       })),
       meta: {
-        nextCursor: rows.length > limit ? encodeOffset(offset + limit) : null,
-        resultCount: page.length,
-        facets: {},
+        nextCursor:
+          rows.length > limit ? encodeOffset(offset + limit) : null,
+        resultCount,
+        facets,
       },
     };
   }

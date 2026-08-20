@@ -13,6 +13,11 @@ import {
   SearchResult,
 } from './search-provider.interface';
 
+/** Safe Meilisearch filter string literal. */
+function quoteFilter(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 @Injectable()
 export class MeilisearchProvider implements SearchProvider, OnModuleInit {
   private readonly logger = new Logger(MeilisearchProvider.name);
@@ -41,11 +46,14 @@ export class MeilisearchProvider implements SearchProvider, OnModuleInit {
   }
 
   async ensureIndex(): Promise<void> {
-    await this.client.createIndex(LISTINGS_INDEX, { primaryKey: 'id' }).catch(() => undefined);
+    await this.client
+      .createIndex(LISTINGS_INDEX, { primaryKey: 'id' })
+      .catch(() => undefined);
     await this.index.updateSettings({
-      searchableAttributes: ['title', 'brand', 'description'],
+      searchableAttributes: ['title', 'brand', 'description', 'categorySlug'],
       filterableAttributes: [
         'categoryId',
+        'categorySlug',
         'condition',
         'brand',
         'size',
@@ -55,11 +63,12 @@ export class MeilisearchProvider implements SearchProvider, OnModuleInit {
       ],
       sortableAttributes: ['priceAed', 'publishedAt'],
       rankingRules: [
+        // Must be present for price/newest sorts to override text ranking
+        'sort',
         'words',
         'typo',
         'proximity',
         'attribute',
-        'sort',
         'exactness',
       ],
     });
@@ -75,29 +84,48 @@ export class MeilisearchProvider implements SearchProvider, OnModuleInit {
 
   async search(query: SearchQuery): Promise<SearchResult> {
     const filters: string[] = ['status = ACTIVE'];
-    if (query.categoryId) filters.push(`categoryId = "${query.categoryId}"`);
+    if (query.categoryId) {
+      filters.push(`categoryId = ${quoteFilter(query.categoryId)}`);
+    }
+    if (query.categorySlug) {
+      filters.push(`categorySlug = ${quoteFilter(query.categorySlug)}`);
+    }
     if (query.condition?.length) {
-      filters.push(`(${query.condition.map((c) => `condition = "${c}"`).join(' OR ')})`);
+      filters.push(
+        `(${query.condition.map((c) => `condition = ${quoteFilter(c)}`).join(' OR ')})`,
+      );
     }
     if (query.brand?.length) {
-      filters.push(`(${query.brand.map((b) => `brand = "${b}"`).join(' OR ')})`);
+      filters.push(
+        `(${query.brand.map((b) => `brand = ${quoteFilter(b)}`).join(' OR ')})`,
+      );
     }
     if (query.size?.length) {
-      filters.push(`(${query.size.map((s) => `size = "${s}"`).join(' OR ')})`);
+      filters.push(
+        `(${query.size.map((s) => `size = ${quoteFilter(s)}`).join(' OR ')})`,
+      );
     }
-    if (query.minPriceAed !== undefined) filters.push(`priceAed >= ${query.minPriceAed}`);
-    if (query.maxPriceAed !== undefined) filters.push(`priceAed <= ${query.maxPriceAed}`);
+    if (query.minPriceAed !== undefined) {
+      filters.push(`priceAed >= ${query.minPriceAed}`);
+    }
+    if (query.maxPriceAed !== undefined) {
+      filters.push(`priceAed <= ${query.maxPriceAed}`);
+    }
 
+    // Relevance: omit sort so Meilisearch ranking rules apply.
+    // newest / price_*: explicit index sorts.
     const sort =
       query.sort === 'price_asc'
-        ? ['priceAed:asc']
+        ? (['priceAed:asc'] as string[])
         : query.sort === 'price_desc'
-          ? ['priceAed:desc']
-          : ['publishedAt:desc'];
+          ? (['priceAed:desc'] as string[])
+          : query.sort === 'newest'
+            ? (['publishedAt:desc'] as string[])
+            : undefined;
 
     const res = await this.index.search(query.q ?? '', {
-      filter: filters,
-      sort,
+      filter: filters.join(' AND '),
+      ...(sort ? { sort } : {}),
       limit: query.limit,
       offset: query.offset,
       facets: ['brand', 'condition', 'size'],

@@ -2,14 +2,14 @@
  * Dev API process: runs dist/main.js and restarts when tsc rewrites dist/.
  * Use: pnpm api   (not `pnpm server` — that is a pnpm built-in for the package store)
  */
-const fs = require('node:fs');
-const path = require('node:path');
-const net = require('node:net');
-const { spawn, execFileSync } = require('node:child_process');
+const fs = require("node:fs");
+const path = require("node:path");
+const net = require("node:net");
+const { spawn, execFileSync } = require("node:child_process");
 
-const root = path.join(__dirname, '..');
-const entry = path.join(root, 'dist', 'main.js');
-const distDir = path.join(root, 'dist');
+const root = path.join(__dirname, "..");
+const entry = path.join(root, "dist", "main.js");
+const distDir = path.join(root, "dist");
 const port = Number(process.env.PORT || 4000);
 
 function log(msg) {
@@ -24,8 +24,8 @@ function err(msg) {
 
 if (!fs.existsSync(entry)) {
   err(
-    'dist/main.js not found.\n' +
-      '         In another terminal: pnpm com\n' +
+    "dist/main.js not found.\n" +
+      "         In another terminal: pnpm com\n" +
       '         Wait for "Found 0 errors", then run pnpm api again.',
   );
   process.exit(1);
@@ -36,8 +36,8 @@ function pidsOnPort(p) {
   const pids = new Set();
   try {
     // Prefer cmd.exe netstat so Git Bash doesn't rewrite the path.
-    const out = execFileSync('cmd.exe', ['/c', 'netstat', '-ano'], {
-      encoding: 'utf8',
+    const out = execFileSync("cmd.exe", ["/c", "netstat", "-ano"], {
+      encoding: "utf8",
       windowsHide: true,
     });
     for (const line of out.split(/\r?\n/)) {
@@ -46,7 +46,7 @@ function pidsOnPort(p) {
       if (!line.match(new RegExp(`:${p}(?!\\d)`))) continue;
       const parts = line.trim().split(/\s+/);
       const pid = parts[parts.length - 1];
-      if (pid && /^\d+$/.test(pid) && pid !== '0') pids.add(Number(pid));
+      if (pid && /^\d+$/.test(pid) && pid !== "0") pids.add(Number(pid));
     }
   } catch {
     /* ignore */
@@ -60,20 +60,20 @@ function killPort(p) {
   for (const pid of pids) {
     log(`port ${p} busy — stopping PID ${pid}`);
     try {
-      execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], {
-        stdio: 'ignore',
+      execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], {
+        stdio: "ignore",
         windowsHide: true,
       });
     } catch {
       try {
         execFileSync(
-          'powershell.exe',
+          "powershell.exe",
           [
-            '-NoProfile',
-            '-Command',
+            "-NoProfile",
+            "-Command",
             `Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`,
           ],
-          { stdio: 'ignore', windowsHide: true },
+          { stdio: "ignore", windowsHide: true },
         );
       } catch {
         err(`could not stop PID ${pid} — free port ${p} manually`);
@@ -85,8 +85,8 @@ function killPort(p) {
 function canBind(p, host) {
   return new Promise((resolve) => {
     const s = net.createServer();
-    s.once('error', () => resolve(false));
-    s.once('listening', () => {
+    s.once("error", () => resolve(false));
+    s.once("listening", () => {
       s.close(() => resolve(true));
     });
     s.listen(p, host);
@@ -99,8 +99,8 @@ async function ensurePortFree(p) {
   killPort(p);
 
   for (let i = 0; i < 10; i++) {
-    const v4 = await canBind(p, '0.0.0.0');
-    const v6 = await canBind(p, '::');
+    const v4 = await canBind(p, "0.0.0.0");
+    const v6 = await canBind(p, "::");
     if (v4 && v6) return;
     killPort(p);
     await new Promise((r) => setTimeout(r, 300));
@@ -109,7 +109,7 @@ async function ensurePortFree(p) {
   const left = pidsOnPort(p);
   if (left.length) {
     err(
-      `port ${p} still in use by PID(s) ${left.join(', ')}. ` +
+      `port ${p} still in use by PID(s) ${left.join(", ")}. ` +
         `Run: taskkill /PID ${left[0]} /F`,
     );
     process.exit(1);
@@ -125,15 +125,15 @@ function stopChild() {
   const c = child;
   child = null;
   try {
-    c.kill('SIGTERM');
+    c.kill("SIGTERM");
   } catch {
     /* ignore */
   }
   // Windows: ensure the tree is gone before rebinding the port.
   try {
     if (c.pid) {
-      execFileSync('taskkill.exe', ['/PID', String(c.pid), '/T', '/F'], {
-        stdio: 'ignore',
+      execFileSync("taskkill.exe", ["/PID", String(c.pid), "/T", "/F"], {
+        stdio: "ignore",
         windowsHide: true,
       });
     }
@@ -146,13 +146,13 @@ function startChild() {
   if (shuttingDown) return;
   stopChild();
   log(`starting node dist/main.js (port ${port})`);
-  child = spawn(process.execPath, ['--enable-source-maps', entry], {
+  child = spawn(process.execPath, ["--enable-source-maps", entry], {
     cwd: root,
-    stdio: 'inherit',
+    stdio: "inherit",
     env: process.env,
     shell: false,
   });
-  child.on('exit', (code, signal) => {
+  child.on("exit", (code, signal) => {
     if (child === null) return;
     child = null;
     if (shuttingDown) return;
@@ -161,10 +161,12 @@ function startChild() {
       return;
     }
     if (code === 0) {
-      err('process exited — waiting for next compile to restart');
+      err("process exited — waiting for next compile to restart");
       return;
     }
-    err(`process exited with code ${code} — waiting for next compile to restart`);
+    err(
+      `process exited with code ${code} — waiting for next compile to restart`,
+    );
   });
 }
 
@@ -181,22 +183,22 @@ function scheduleRestart(reason) {
 async function main() {
   await ensurePortFree(port);
 
-  log('watching dist/ for changes — Ctrl+C to stop');
+  log("watching dist/ for changes — Ctrl+C to stop");
   startChild();
 
   let watch;
   try {
     watch = fs.watch(distDir, { recursive: true }, (_event, filename) => {
       if (!filename) {
-        scheduleRestart('dist change');
+        scheduleRestart("dist change");
         return;
       }
-      if (!String(filename).endsWith('.js')) return;
+      if (!String(filename).endsWith(".js")) return;
       scheduleRestart(String(filename));
     });
   } catch (e) {
     err(`could not watch dist/: ${/** @type {Error} */ (e).message}`);
-    err('API will not auto-restart on compile — restart pnpm api manually.');
+    err("API will not auto-restart on compile — restart pnpm api manually.");
   }
 
   const shutdown = () => {
@@ -212,8 +214,8 @@ async function main() {
     process.exit(0);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main().catch((e) => {

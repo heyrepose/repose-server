@@ -1395,9 +1395,10 @@ async function reindexMeilisearch(): Promise<void> {
   await client.createIndex(indexUid, { primaryKey: 'id' }).catch(() => undefined);
   const index = client.index(indexUid);
   await index.updateSettings({
-    searchableAttributes: ['title', 'brand', 'description'],
+    searchableAttributes: ['title', 'brand', 'description', 'categorySlug'],
     filterableAttributes: [
       'categoryId',
+      'categorySlug',
       'condition',
       'brand',
       'size',
@@ -1407,11 +1408,11 @@ async function reindexMeilisearch(): Promise<void> {
     ],
     sortableAttributes: ['priceAed', 'publishedAt'],
     rankingRules: [
+      'sort',
       'words',
       'typo',
       'proximity',
       'attribute',
-      'sort',
       'exactness',
     ],
   });

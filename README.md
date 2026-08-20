@@ -11,7 +11,7 @@ NestJS · Prisma · PostgreSQL · Redis · Meilisearch · Stripe · Cloudinary �
 ## Setup
 
 ```bash
-cp .env.example .env   # or keep your existing .env
+# Create/edit a single env file at the repo root: `.env`
 # Ensure Postgres, Redis, and Meilisearch are running locally
 pnpm install
 pnpm prisma:generate
