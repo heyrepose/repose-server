@@ -12,6 +12,7 @@ coverage/
 .env.*
 *.env
 *.env.*
+env.production.txt
 
 # Logs & OS
 *.log

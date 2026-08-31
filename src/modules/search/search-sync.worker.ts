@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { Job, Worker } from 'bullmq';
 import type { AppConfig } from '../../config/configuration';
 import { PrismaService } from '../../prisma/prisma.service';
+import { redisConnectionFromUrl } from '../../redis/redis-connection';
 import { SEARCH_SYNC_QUEUE } from './search.constants';
 import { SearchSyncJob } from './search-sync.service';
 import { toSearchDoc } from './search.mapper';
@@ -34,11 +35,12 @@ export class SearchSyncWorker implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    const url = this.config.get('REDIS_URL', { infer: true });
     this.worker = new Worker<SearchSyncJob>(
       SEARCH_SYNC_QUEUE,
       (job) => this.process(job),
       {
-        connection: { url: this.config.get('REDIS_URL', { infer: true }) },
+        connection: redisConnectionFromUrl(url),
         concurrency: 5,
       },
     );

@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
 import type { AppConfig } from '../../config/configuration';
+import { redisConnectionFromUrl } from '../../redis/redis-connection';
 import { SEARCH_SYNC_QUEUE } from './search.constants';
 
 export interface SearchSyncJob {
@@ -27,8 +28,9 @@ export class SearchSyncService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
   onModuleInit(): void {
+    const url = this.config.get('REDIS_URL', { infer: true });
     this.queue = new Queue<SearchSyncJob>(SEARCH_SYNC_QUEUE, {
-      connection: { url: this.config.get('REDIS_URL', { infer: true }) },
+      connection: redisConnectionFromUrl(url),
       defaultJobOptions: {
         attempts: 5,
         backoff: { type: 'exponential', delay: 2000 },

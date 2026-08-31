@@ -1,0 +1,12 @@
+# Railway — repose-server
+# Add plugins: PostgreSQL + Redis. Optionally a Meilisearch service (or Meilisearch Cloud).
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "pnpm install --frozen-lockfile && pnpm prisma:generate && pnpm build"
+
+[deploy]
+startCommand = "pnpm start:migrate"
+healthcheckPath = "/api/v1/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

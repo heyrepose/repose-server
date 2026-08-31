@@ -28,3 +28,13 @@ pnpm dev
 - `repose-web` — Next.js marketplace (separate repo; different developer)
 - `repose-mobile` — Flutter app (later)
 - Contract: `documentation/03-API-REFERENCE.md` + OpenAPI (`pnpm openapi:export`)
+
+## Railway
+
+See `documentation/09-DEVOPS-DEPLOYMENT.md` §9. Short version:
+
+1. New Railway project → deploy this repo.
+2. Add **Postgres** + **Redis** plugins; reference `DATABASE_URL` and `REDIS_URL` on the API service.
+3. Set secrets (`JWT_*`, `CORS_ORIGINS`, Cloudinary, Meilisearch, …).
+4. Start command is `pnpm start:migrate` (applies Prisma migrations, then boots).
+5. Health: `GET /api/v1/health` (checks Postgres + Redis).

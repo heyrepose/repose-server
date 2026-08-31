@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import type { AppConfig } from '../config/configuration';
+import { redisConnectionFromUrl } from './redis-connection';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -16,13 +17,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly config: ConfigService<AppConfig, true>) {}
 
   onModuleInit(): void {
-    this.client = new Redis(this.config.get('REDIS_URL', { infer: true }), {
+    const url = this.config.get('REDIS_URL', { infer: true });
+    const base = redisConnectionFromUrl(url);
+    this.client = new Redis(base.url, {
       maxRetriesPerRequest: 2,
+      enableReadyCheck: base.enableReadyCheck,
       lazyConnect: false,
+      ...(base.tls ? { tls: base.tls } : {}),
     });
     this.client.on('error', (err) =>
       this.logger.warn(`Redis error: ${err.message}`),
     );
+    this.client.on('connect', () => this.logger.log('Redis connected'));
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -31,6 +37,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   get raw(): Redis {
     return this.client;
+  }
+
+  /** Ping for health checks. */
+  async ping(): Promise<string> {
+    return this.client.ping();
   }
 
   async get(key: string): Promise<string | null> {

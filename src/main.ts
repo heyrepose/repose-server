@@ -53,7 +53,8 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup('api/v1/docs', app, document);
 
   const port = config.get('PORT', { infer: true });
-  await app.listen(port);
+  // Railway / containers inject PORT; bind all interfaces.
+  await app.listen(port, '0.0.0.0');
 }
 
 void bootstrap();
