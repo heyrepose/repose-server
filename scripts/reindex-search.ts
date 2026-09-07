@@ -1,21 +1,27 @@
 /**
  * One-off: rebuild Meilisearch from active Postgres listings.
  * Usage: npx ts-node scripts/reindex-search.ts
+ *
+ * Loads `.env` when present (local). On Railway, env vars are already injected —
+ * missing `.env` is fine.
  */
 import * as fs from "fs";
 import * as path from "path";
 import { PrismaClient } from "@prisma/client";
 import { MeiliSearch } from "meilisearch";
 
-for (const line of fs
-  .readFileSync(path.join(__dirname, "..", ".env"), "utf8")
-  .split(/\r?\n/)) {
-  if (!line || line.startsWith("#")) continue;
-  const i = line.indexOf("=");
-  if (i < 0) continue;
-  const k = line.slice(0, i);
-  const v = line.slice(i + 1);
-  if (!process.env[k]) process.env[k] = v;
+const envPath = path.join(__dirname, "..", ".env");
+if (fs.existsSync(envPath)) {
+  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    if (!line || line.startsWith("#")) continue;
+    const i = line.indexOf("=");
+    if (i < 0) continue;
+    const k = line.slice(0, i);
+    const v = line.slice(i + 1);
+    if (!process.env[k]) process.env[k] = v;
+  }
+} else {
+  console.log("No .env file — using process.env (Railway / CI)");
 }
 
 const prisma = new PrismaClient();
