@@ -36,6 +36,18 @@ const ASSETS_DIR = path.resolve(
   'stitch_p2p_marketplace_asset_generator',
 );
 
+/**
+ * When true (or when ASSETS_DIR is missing and this is set), skip local PNG
+ * uploads and point listing/avatar URLs at existing Cloudinary objects under
+ * `repose/seed/...` (same public_ids as a normal seed upload).
+ *
+ * Use on Railway: `SEED_REUSE_CLOUDINARY=1 NODE_ENV=development pnpm prisma:seed`
+ * Requires a prior local seed (or upload) to the same Cloudinary cloud.
+ */
+const REUSE_CLOUDINARY =
+  process.env.SEED_REUSE_CLOUDINARY === '1' ||
+  process.env.SEED_REUSE_CLOUDINARY === 'true';
+
 const PASSWORD = 'password123';
 const COMMISSION_RATE = Number(process.env.COMMISSION_RATE ?? '0.10');
 
@@ -71,13 +83,34 @@ function configureCloudinary(): void {
 /** Cache by asset folder so reused images upload once. */
 const uploadCache = new Map<string, string>();
 
-/** Upload screen.png from a Stitch asset folder. */
+/** Upload screen.png from a Stitch asset folder (or reuse Cloudinary URL). */
 async function uploadAsset(
   folderName: string,
   publicId: string,
   cloudFolder: string,
 ): Promise<string> {
   if (uploadCache.has(folderName)) return uploadCache.get(folderName)!;
+
+  const cloudPath = `repose/seed/${cloudFolder}/${publicId}`;
+
+  if (REUSE_CLOUDINARY) {
+    const url = cloudinary.url(cloudPath, {
+      secure: true,
+      resource_type: 'image',
+    });
+    uploadCache.set(folderName, url);
+    console.log(`  ☁ ${publicId} (reuse Cloudinary)`);
+    return url;
+  }
+
+  if (!fs.existsSync(ASSETS_DIR)) {
+    throw new Error(
+      `Stitch assets folder not found: ${ASSETS_DIR}\n` +
+        `On Railway the documentation/ folder is not deployed. Re-run with:\n` +
+        `  SEED_REUSE_CLOUDINARY=1 NODE_ENV=development pnpm prisma:seed\n` +
+        `(uses images already on Cloudinary from a previous local seed)`,
+    );
+  }
 
   const filePath = path.join(ASSETS_DIR, folderName, 'screen.png');
   if (!fs.existsSync(filePath)) {
@@ -1456,8 +1489,17 @@ async function main() {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to run full wipe seed in production');
   }
-  if (!fs.existsSync(ASSETS_DIR)) {
-    throw new Error(`Stitch assets folder not found: ${ASSETS_DIR}`);
+  if (!REUSE_CLOUDINARY && !fs.existsSync(ASSETS_DIR)) {
+    throw new Error(
+      `Stitch assets folder not found: ${ASSETS_DIR}\n` +
+        `On Railway run:\n` +
+        `  SEED_REUSE_CLOUDINARY=1 NODE_ENV=development pnpm prisma:seed`,
+    );
+  }
+  if (REUSE_CLOUDINARY) {
+    console.log(
+      'SEED_REUSE_CLOUDINARY=1 — linking existing Cloudinary seed images (no local PNGs)',
+    );
   }
 
   configureCloudinary();
