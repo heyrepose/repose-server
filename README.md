@@ -31,10 +31,13 @@ pnpm dev
 
 ## Railway
 
-See `documentation/09-DEVOPS-DEPLOYMENT.md` §9. Short version:
+See **`documentation/RAILWAY-DEPLOYMENT.md`** for the full step-by-step guide (Postgres, Redis, Meilisearch, env vars, Vercel wiring).
 
-1. New Railway project → deploy this repo.
+Short version:
+
+1. New Railway project → deploy this repo from GitHub.
 2. Add **Postgres** + **Redis** plugins; reference `DATABASE_URL` and `REDIS_URL` on the API service.
-3. Set secrets (`JWT_*`, `CORS_ORIGINS`, Cloudinary, Meilisearch, …).
-4. Start command is `pnpm start:migrate` (applies Prisma migrations, then boots).
-5. Health: `GET /api/v1/health` (checks Postgres + Redis).
+3. Add **Meilisearch** (Docker `getmeili/meilisearch:v1.9`) + public domain.
+4. Paste variables from `env.production.txt` (gitignored).
+5. Start command: `pnpm start:migrate` (from `railway.toml`).
+6. Health: `GET /api/v1/health`.

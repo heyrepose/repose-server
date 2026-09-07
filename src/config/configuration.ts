@@ -29,9 +29,15 @@ const envSchema = z.object({
   OTP_TTL_SECONDS: z.coerce.number().default(300),
   OTP_MAX_ATTEMPTS: z.coerce.number().default(5),
 
-  // Search
-  MEILISEARCH_HOST: z.string().default("http://localhost:7700"),
-  MEILISEARCH_API_KEY: z.string().default("dev-master-key"),
+  // Search — treat blank Railway vars as unset so defaults apply.
+  MEILISEARCH_HOST: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().default("http://localhost:7700"),
+  ),
+  MEILISEARCH_API_KEY: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.string().min(1).default("dev-master-key"),
+  ),
 
   // Cloudinary — prefer CLOUDINARY_URL (API environment variable from console).
   // Format: cloudinary://<api_key>:<api_secret>@<cloud_name>

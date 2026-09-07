@@ -24,10 +24,18 @@ export class MeilisearchProvider implements SearchProvider, OnModuleInit {
   private client: MeiliSearch;
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {
+    const host = this.config.get('MEILISEARCH_HOST', { infer: true });
+    const apiKey = this.config.get('MEILISEARCH_API_KEY', { infer: true });
     this.client = new MeiliSearch({
-      host: this.config.get('MEILISEARCH_HOST', { infer: true }),
-      apiKey: this.config.get('MEILISEARCH_API_KEY', { infer: true }),
+      host,
+      // Meili rejects requests with no Bearer when MEILI_MASTER_KEY is set.
+      apiKey: apiKey || undefined,
     });
+    if (!apiKey) {
+      this.logger.warn(
+        'MEILISEARCH_API_KEY is empty — set it to the same value as MEILI_MASTER_KEY on the Meili service',
+      );
+    }
   }
 
   private get index(): Index<ListingSearchDoc> {
